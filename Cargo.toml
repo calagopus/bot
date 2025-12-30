@@ -46,6 +46,5 @@ strip = "symbols"
 
 [profile.release]
 opt-level = "s"
-lto = "fat"
-codegen-units = 1
+codegen-units = 2
 strip = "symbols"

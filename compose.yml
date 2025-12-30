@@ -1,11 +1,14 @@
 services:
-  web:
+  bot:
     image: ghcr.io/calagopus/bot:latest
     restart: unless-stopped
     environment:
       - TZ=Europe/Berlin
       - DATABASE_URL=sqlite:///var/lib/bot/calagopus_bot.db
       - DATABASE_MIGRATE=true
+      - GITHUB_CHANNEL_ID=1234567890123456
+      - GITHUB_WEBHOOK_SECRET=your_webhook_secret_here
+      - BOT_TOKEN=xxx
       - PORT=8000
       - APP_DEBUG=false
       - APP_URL=http://localhost:8000

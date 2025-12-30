@@ -3,6 +3,7 @@ use utoipa_axum::{router::OpenApiRouter, routes};
 
 mod post {
     use crate::{
+        models::MESSAGE_LOCK,
         response::{ApiResponse, ApiResponseResult},
         routes::{ApiError, GetState},
     };
@@ -392,6 +393,7 @@ mod post {
                 let workflow_job_data: WorkflowJobData =
                     serde_json::from_value(workflow_job.workflow_job)?;
 
+                let _lock = MESSAGE_LOCK.lock().await;
                 let mut github_message: crate::models::GithubMessage = sqlx::query_as(
                     "SELECT * FROM github_messages WHERE repository_id = ? AND workflow_sha = ?",
                 )

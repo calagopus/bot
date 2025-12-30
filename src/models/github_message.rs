@@ -3,6 +3,8 @@ use octocrab::models::webhook_events::payload::PushWebhookEventCommit;
 use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, Row, sqlite::SqliteRow};
 
+pub static MESSAGE_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct WorkflowStatus {
     pub name: String,

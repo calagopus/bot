@@ -1,7 +1,6 @@
 use futures::TryStreamExt;
 use serenity::all::CreateAutocompleteResponse;
 use sqlx::{FromRow, Row, sqlite::SqliteRow};
-use std::collections::BTreeMap;
 
 #[derive(Debug)]
 pub struct TextMessage {
@@ -12,7 +11,7 @@ pub struct TextMessage {
     pub title: String,
     pub content: String,
 
-    pub roles: BTreeMap<u64, String>,
+    pub roles: indexmap::IndexMap<u64, String>,
 }
 
 impl FromRow<'_, SqliteRow> for TextMessage {

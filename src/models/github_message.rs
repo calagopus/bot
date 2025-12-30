@@ -2,7 +2,6 @@ use chrono::DateTime;
 use octocrab::models::webhook_events::payload::PushWebhookEventCommit;
 use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, Row, sqlite::SqliteRow};
-use std::collections::HashMap;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct WorkflowStatus {
@@ -18,7 +17,7 @@ pub struct GithubMessage {
 
     pub commits: Vec<PushWebhookEventCommit>,
 
-    pub workflow_status: HashMap<i64, WorkflowStatus>,
+    pub workflow_status: indexmap::IndexMap<i64, WorkflowStatus>,
 }
 
 impl FromRow<'_, SqliteRow> for GithubMessage {

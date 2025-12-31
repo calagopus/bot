@@ -12,14 +12,16 @@ impl serenity::all::RawEventHandler for EventHandler {
         let run = async || -> Result<(), anyhow::Error> {
             match event {
                 Event::Ready(event) => {
-                    /*poise::builtins::register_globally(
-                        &ctx.http,
-                        crate::commands::commands(crate::commands::CommandList::new())
-                            .into_vec()
-                            .iter(),
-                    )
-                    .await
-                    .ok();*/
+                    if !state.env.app_debug {
+                        poise::builtins::register_globally(
+                            &ctx.http,
+                            crate::commands::commands(crate::commands::CommandList::new())
+                                .into_vec()
+                                .iter(),
+                        )
+                        .await
+                        .ok();
+                    }
 
                     ctx.set_presence(
                         Some(ActivityData::custom("Playing with Rust Code")),

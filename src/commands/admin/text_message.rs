@@ -1,4 +1,4 @@
-use crate::modals::text_message_modify::TextMessageModifyModal;
+use crate::modals::{text_message::TextMessageModal, text_message_modify::TextMessageModifyModal};
 use poise::{CreateReply, Modal};
 use serenity::all::GuildChannel;
 
@@ -7,6 +7,7 @@ use serenity::all::GuildChannel;
     slash_command,
     rename = "text-message",
     subcommands(
+        "admin_text_message_send_once_command",
         "admin_text_message_add_command",
         "admin_text_message_update_command",
         "admin_text_message_sync_command",
@@ -15,6 +16,44 @@ use serenity::all::GuildChannel;
     )
 )]
 pub async fn admin_text_message_command(_ctx: crate::BotContext<'_>) -> Result<(), anyhow::Error> {
+    Ok(())
+}
+
+/// Add a new text message to be sent by the bot.
+#[poise::command(slash_command, rename = "send-once")]
+pub async fn admin_text_message_send_once_command(
+    ctx: crate::BotContext<'_>,
+    #[description = "The channel to send the message to"] channel: GuildChannel,
+) -> Result<(), anyhow::Error> {
+    let Some(data) = TextMessageModal::execute(ctx).await? else {
+        return Ok(());
+    };
+
+    let message = channel
+        .send_message(
+            ctx.http(),
+            serenity::all::CreateMessage::new()
+                .components(&[serenity::all::CreateComponent::Container(
+                    serenity::all::CreateContainer::new(&[
+                        serenity::all::CreateContainerComponent::TextDisplay(
+                            serenity::all::CreateTextDisplay::new(format!("## {}", data.title)),
+                        ),
+                        serenity::all::CreateContainerComponent::TextDisplay(
+                            serenity::all::CreateTextDisplay::new(data.content),
+                        ),
+                    ]),
+                )])
+                .flags(serenity::all::MessageFlags::IS_COMPONENTS_V2),
+        )
+        .await?;
+
+    ctx.send(
+        CreateReply::default()
+            .content(format!("Text message sent. ({})", message.link()))
+            .ephemeral(true),
+    )
+    .await?;
+
     Ok(())
 }
 

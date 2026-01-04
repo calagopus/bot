@@ -19,7 +19,7 @@ pub async fn admin_text_message_command(_ctx: crate::BotContext<'_>) -> Result<(
     Ok(())
 }
 
-/// Add a new text message to be sent by the bot.
+/// Sends a new text message using the bot.
 #[poise::command(slash_command, rename = "send-once")]
 pub async fn admin_text_message_send_once_command(
     ctx: crate::BotContext<'_>,

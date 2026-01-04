@@ -108,7 +108,7 @@ mod post {
 
                 for commit in push.commits.iter() {
                     commit_string.push_str(&format!(
-                        "[`{}`]({}): {}",
+                        "[`{}`]({}): {}\n",
                         commit.id.chars().take(7).collect::<String>(),
                         commit.url,
                         commit.message.lines().next().unwrap_or_default()
@@ -445,7 +445,7 @@ mod post {
 
             for commit in edit_github_message.commits.iter() {
                 commit_string.push_str(&format!(
-                    "[`{}`]({}): {}",
+                    "[`{}`]({}): {}\n",
                     commit.id.chars().take(7).collect::<String>(),
                     commit.url,
                     commit.message.lines().next().unwrap_or_default()

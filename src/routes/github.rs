@@ -393,7 +393,7 @@ mod post {
                 let workflow_job_data: WorkflowJobData =
                     serde_json::from_value(workflow_job.workflow_job)?;
 
-                let _lock = MESSAGE_LOCK.lock().await;
+                let lock = MESSAGE_LOCK.lock().await;
                 let mut github_message: crate::models::GithubMessage = sqlx::query_as(
                     "SELECT * FROM github_messages WHERE repository_id = ? AND workflow_sha = ?",
                 )
@@ -417,6 +417,7 @@ mod post {
                     .bind(github_message.id)
                     .execute(state.database.write())
                     .await?;
+                drop(lock);
 
                 edit_github_message = Some((github_message, workflow_job_data.run_id));
             }
@@ -544,7 +545,7 @@ mod post {
                 .await?;
 
             return ApiResponse::json(Response {}).ok();
-        } else {
+        } else if !container_components.is_empty() {
             container_components.push(CreateContainerComponent::TextDisplay(
                 CreateTextDisplay::new(format!(
                     "-# {}",

@@ -1,4 +1,5 @@
 use crate::modals::{text_message::TextMessageModal, text_message_modify::TextMessageModifyModal};
+use indexmap::IndexMap;
 use poise::{CreateReply, Modal};
 use serenity::all::GuildChannel;
 
@@ -67,12 +68,18 @@ pub async fn admin_text_message_add_command(
         return Ok(());
     };
 
+    let mut roles = IndexMap::new();
+    for role in data.roles.unwrap_or_default() {
+        roles.insert(role.id.get(), role.name.to_string());
+    }
+
     let mut text_message: crate::models::TextMessage = sqlx::query_as(
-        "INSERT INTO text_messages (channel_id, title, content) VALUES (?, ?, ?) RETURNING *",
+        "INSERT INTO text_messages (channel_id, title, content, roles) VALUES (?, ?, ?, ?) RETURNING *",
     )
     .bind(channel.id.get() as i64)
     .bind(&data.title)
     .bind(&data.content)
+    .bind(serde_json::to_string(&roles)?)
     .fetch_one(ctx.data().database.write())
     .await?;
 
@@ -113,11 +120,34 @@ pub async fn admin_text_message_update_command(
         return Ok(());
     };
 
+    let guild_id = match ctx.guild_id() {
+        Some(guild) => guild,
+        None => {
+            ctx.send(
+                CreateReply::default()
+                    .content("This command can only be used in a guild.")
+                    .ephemeral(true),
+            )
+            .await?;
+            return Ok(());
+        }
+    };
+
+    let mut roles = Vec::new();
+    for role_id in text_message.roles.keys() {
+        roles.push(
+            ctx.http()
+                .get_guild_role(guild_id, (*role_id).into())
+                .await?,
+        );
+    }
+
     let Some(data) = TextMessageModifyModal::execute_with_defaults(
         ctx,
         TextMessageModifyModal {
             title: text_message.title,
             content: text_message.content,
+            roles: Some(roles),
         },
     )
     .await?
@@ -125,12 +155,21 @@ pub async fn admin_text_message_update_command(
         return Ok(());
     };
 
+    ctx.defer_ephemeral().await?;
+
     text_message.title = data.title;
     text_message.content = data.content;
+    text_message.roles = data
+        .roles
+        .unwrap_or_default()
+        .into_iter()
+        .map(|role| (role.id.get(), role.name.to_string()))
+        .collect();
 
-    sqlx::query("UPDATE text_messages SET title = ?, content = ? WHERE id = ?")
+    sqlx::query("UPDATE text_messages SET title = ?, content = ?, roles = ? WHERE id = ?")
         .bind(&text_message.title)
         .bind(&text_message.content)
+        .bind(serde_json::to_string(&text_message.roles)?)
         .bind(text_message.id)
         .execute(ctx.data().database.write())
         .await?;

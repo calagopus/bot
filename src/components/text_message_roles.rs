@@ -13,7 +13,8 @@ impl crate::components::Component for TextMessageRoles {
         ctx: &serenity::prelude::Context,
         interaction: &ComponentInteraction,
     ) -> Result<Option<()>, anyhow::Error> {
-        let ComponentInteractionDataKind::RoleSelect { values, .. } = &interaction.data.kind else {
+        let ComponentInteractionDataKind::StringSelect { values, .. } = &interaction.data.kind
+        else {
             return Ok(None);
         };
 
@@ -65,7 +66,7 @@ impl crate::components::Component for TextMessageRoles {
         interaction.defer_ephemeral(&ctx.http).await?;
 
         for (role_id, _) in text_message.roles {
-            if values.contains(&role_id.into()) {
+            if values.contains(&role_id.to_string()) {
                 ctx.http
                     .add_member_role(guild_id, interaction.user.id, role_id.into(), None)
                     .await?;

@@ -1,7 +1,7 @@
 FROM alpine:latest
 
-# Add panel-rs and entrypoint
+# Add calagopus-bot and entrypoint
 ARG TARGETPLATFORM
-COPY .docker/${TARGETPLATFORM#linux/}/bot-rs /usr/bin/bot-rs
+COPY .docker/${TARGETPLATFORM#linux/}/calagopus-bot /usr/bin/calagopus-bot
 
-ENTRYPOINT ["/usr/bin/bot-rs"]
+ENTRYPOINT ["/usr/bin/calagopus-bot"]

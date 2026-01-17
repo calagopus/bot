@@ -1,6 +1,7 @@
 use poise::Modal;
 
 #[derive(Debug, Modal)]
+#[name = "Send Text Message Once"]
 pub struct TextMessageModal {
     #[name = "Text Message Title"]
     #[min_length = 1]

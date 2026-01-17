@@ -107,10 +107,14 @@ impl TextMessage {
         if !self.roles.is_empty() {
             let mut options = Vec::new();
             for (role_id, role_name) in &self.roles {
-                options.push(serenity::all::CreateSelectMenuOption::new(
-                    role_name,
-                    role_id.to_string(),
-                ));
+                options.push(
+                    serenity::all::CreateSelectMenuOption::new(role_name, role_id.to_string())
+                        .emoji(serenity::all::ReactionType::Custom {
+                            animated: false,
+                            id: (1169252443960377354).into(),
+                            name: None,
+                        }),
+                );
             }
 
             container_components.push(serenity::all::CreateContainerComponent::Separator(

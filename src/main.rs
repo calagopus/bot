@@ -35,6 +35,7 @@ static ALLOC: Jemalloc = Jemalloc;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 const GIT_COMMIT: &str = env!("CARGO_GIT_COMMIT");
+const GIT_BRANCH: &str = env!("CARGO_GIT_BRANCH");
 
 pub type GetIp = axum::extract::Extension<std::net::IpAddr>;
 pub type BotContext<'a> = poise::ApplicationContext<'a, routes::InnerState, anyhow::Error>;
@@ -71,7 +72,7 @@ async fn main() {
         env.sentry_url.clone(),
         sentry::ClientOptions {
             server_name: env.server_name.clone().map(|s| s.into()),
-            release: Some(format!("{VERSION}:{GIT_COMMIT}").into()),
+            release: Some(format!("{VERSION}:{GIT_COMMIT}@{GIT_BRANCH}").into()),
             traces_sample_rate: 1.0,
             ..Default::default()
         },
@@ -80,7 +81,7 @@ async fn main() {
     let env = Arc::new(env);
     let state = Arc::new(routes::InnerState {
         start_time: Instant::now(),
-        version: format!("{VERSION}:{GIT_COMMIT}"),
+        version: format!("{VERSION}:{GIT_COMMIT}@{GIT_BRANCH}"),
 
         env: env.clone(),
         database: Arc::new(database::Database::new(env.clone()).await),

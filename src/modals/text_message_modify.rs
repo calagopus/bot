@@ -13,7 +13,7 @@ pub struct TextMessageModifyModal {
     #[paragraph]
     pub content: String,
     #[name = "Roles"]
-    #[role_select()]
+    #[role_select]
     #[max_items = 25]
     #[placeholder = "Select roles that can be selected by users"]
     pub roles: Option<Vec<Role>>,

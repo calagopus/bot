@@ -2,6 +2,8 @@ use super::State;
 use utoipa_axum::{router::OpenApiRouter, routes};
 
 mod post {
+    use std::sync::LazyLock;
+
     use crate::{
         models::MESSAGE_LOCK,
         response::{ApiResponse, ApiResponseResult},
@@ -135,6 +137,21 @@ mod post {
             }
             WebhookEventPayload::Star(star) => match star.action {
                 StarWebhookEventAction::Created => {
+                    pub static STAR_DEDUP_CACHE: LazyLock<moka::future::Cache<(u64, u64), ()>> =
+                        LazyLock::new(|| {
+                            moka::future::Cache::builder()
+                                .time_to_live(std::time::Duration::from_secs(600))
+                                .max_capacity(1000)
+                                .build()
+                        });
+
+                    let dedup_key = (*repository.id, *sender.id);
+                    if STAR_DEDUP_CACHE.get(&dedup_key).await.is_some() {
+                        return ApiResponse::json(Response {}).ok();
+                    }
+
+                    STAR_DEDUP_CACHE.insert(dedup_key, ()).await;
+
                     container_components.push(CreateContainerComponent::Section(
                         CreateSection::new(
                             vec![
@@ -161,6 +178,21 @@ mod post {
                     ));
                 }
                 StarWebhookEventAction::Deleted => {
+                    pub static UNSTAR_DEDUP_CACHE: LazyLock<moka::future::Cache<(u64, u64), ()>> =
+                        LazyLock::new(|| {
+                            moka::future::Cache::builder()
+                                .time_to_live(std::time::Duration::from_secs(600))
+                                .max_capacity(1000)
+                                .build()
+                        });
+
+                    let dedup_key = (*repository.id, *sender.id);
+                    if UNSTAR_DEDUP_CACHE.get(&dedup_key).await.is_some() {
+                        return ApiResponse::json(Response {}).ok();
+                    }
+
+                    UNSTAR_DEDUP_CACHE.insert(dedup_key, ()).await;
+
                     container_components.push(CreateContainerComponent::Section(
                         CreateSection::new(
                             vec![

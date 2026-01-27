@@ -1,6 +1,6 @@
 [package]
 name = "bot-rs"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 
 [dependencies]
@@ -33,6 +33,7 @@ sha2 = "0.10.9"
 hmac = "0.12.1"
 hex = "0.4.3"
 indexmap = { version = "2.12.1", features = ["serde"] }
+moka = { version = "0.12.13", features = ["future"] }
 
 [profile.dev.package."*"]
 opt-level = 3

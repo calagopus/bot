@@ -110,9 +110,10 @@ mod post {
 
                 for commit in push.commits.iter() {
                     commit_string.push_str(&format!(
-                        "[`{}`]({}): {}\n",
+                        "[`{}`]({}) ({}): {}\n",
                         commit.id.chars().take(7).collect::<String>(),
                         commit.url,
+                        commit.author.user.name,
                         commit.message.lines().next().unwrap_or_default()
                     ));
                 }

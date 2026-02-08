@@ -515,19 +515,19 @@ async fn handle_organization_event(
     state: &State,
     event: octocrab::models::webhook_events::WebhookEvent,
 ) -> ApiResponseResult {
-    let Some(organization) = event.organization else {
-        return ApiResponse::error("missing organization information in webhook payload")
-            .with_status(StatusCode::BAD_REQUEST)
-            .ok();
-    };
-
     let mut container_components = Vec::new();
 
     if let WebhookEventPayload::Sponsorship(sponsorship) = event.specific
         && sponsorship.action == SponsorshipWebhookEventAction::Created
     {
         #[derive(Deserialize)]
-        struct SponsorshipUser {
+        struct SponsorshipMaintainer {
+            avatar_url: String,
+            login: String,
+        }
+
+        #[derive(Deserialize)]
+        struct SponsorshipSponsor {
             avatar_url: String,
             login: String,
         }
@@ -539,7 +539,9 @@ async fn handle_organization_event(
 
         #[derive(Deserialize)]
         struct SponsorshipData {
-            sponsor: Option<SponsorshipUser>,
+            maintainer: SponsorshipMaintainer,
+            sponsor: Option<SponsorshipSponsor>,
+            privacy_level: String,
             tier: SponsorshipTier,
         }
 
@@ -551,7 +553,9 @@ async fn handle_organization_event(
                     "## <:cash:1150889514236137605> Sponsorship received",
                 )),
                 CreateSectionComponent::TextDisplay(CreateTextDisplay::new(
-                    if let Some(sponsor) = &sponsorship_data.sponsor {
+                    if let Some(sponsor) = &sponsorship_data.sponsor
+                        && sponsorship_data.privacy_level == "public"
+                    {
                         format!(
                             "[**{login}**](https://github.com/{login}) sponsored us for `${}.00`!",
                             sponsorship_data.tier.monthly_price_in_dollars,
@@ -559,18 +563,25 @@ async fn handle_organization_event(
                         )
                     } else {
                         format!(
-                            "**Someone** (GitHub won't tell us) sponsored us for `${}.00`!",
+                            "**Someone** (Anonymous) sponsored us for `${}.00`!",
                             sponsorship_data.tier.monthly_price_in_dollars
                         )
                     },
                 )),
             ],
             CreateSectionAccessory::Thumbnail(CreateThumbnail::new(CreateUnfurledMediaItem::new(
-                sponsorship_data
-                    .sponsor
-                    .map_or_else(|| organization.avatar_url.to_string(), |s| s.avatar_url),
+                sponsorship_data.sponsor.map_or_else(
+                    || sponsorship_data.maintainer.avatar_url.to_string(),
+                    |s| s.avatar_url,
+                ),
             ))),
         )));
+        container_components.push(CreateContainerComponent::TextDisplay(
+            CreateTextDisplay::new(format!(
+                "-# https://github.com/sponsors/{}",
+                sponsorship_data.maintainer.login
+            )),
+        ));
     }
 
     let Some(channel) = state
@@ -589,14 +600,6 @@ async fn handle_organization_event(
     };
 
     if !container_components.is_empty() {
-        container_components.push(CreateContainerComponent::TextDisplay(
-            CreateTextDisplay::new(format!(
-                "-# {}",
-                organization
-                    .html_url
-                    .map_or_else(|| organization.login, |h| h.to_string())
-            )),
-        ));
         let component = CreateComponent::Container(CreateContainer::new(container_components));
 
         channel

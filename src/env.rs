@@ -9,6 +9,7 @@ pub struct Env {
     pub database_migrate: bool,
 
     pub github_channel_id: u64,
+    pub github_sponsors_channel_id: Option<u64>,
     pub github_verify_token: String,
 
     pub bot_token: String,
@@ -46,6 +47,11 @@ impl Env {
                 .trim_matches('"')
                 .parse()
                 .unwrap(),
+            github_sponsors_channel_id: std::env::var("GITHUB_SPONSORS_CHANNEL_ID")
+                .map(|c| c.trim_matches('"').to_string())
+                .unwrap_or("".to_string())
+                .parse()
+                .ok(),
             github_verify_token: std::env::var("GITHUB_VERIFY_TOKEN")
                 .expect("GITHUB_VERIFY_TOKEN is required")
                 .trim_matches('"')

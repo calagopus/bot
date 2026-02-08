@@ -516,6 +516,7 @@ async fn handle_organization_event(
     event: octocrab::models::webhook_events::WebhookEvent,
 ) -> ApiResponseResult {
     let mut container_components = Vec::new();
+    let mut channel_id = state.env.github_channel_id;
 
     if let WebhookEventPayload::Sponsorship(sponsorship) = event.specific
         && sponsorship.action == SponsorshipWebhookEventAction::Created
@@ -582,19 +583,23 @@ async fn handle_organization_event(
                 sponsorship_data.maintainer.login
             )),
         ));
+
+        if let Some(sponsors_channel_id) = state.env.github_sponsors_channel_id {
+            channel_id = sponsors_channel_id;
+        }
     }
 
     let Some(channel) = state
         .bot
         .read()
         .await
-        .get_channel(state.env.github_channel_id.into())
+        .get_channel(channel_id.into())
         .await?
         .guild()
     else {
         tracing::error!(
             "github webhook channel ID {} is not a guild channel",
-            state.env.github_channel_id
+            channel_id
         );
         return ApiResponse::json(Response {}).ok();
     };

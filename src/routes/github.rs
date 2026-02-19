@@ -323,6 +323,7 @@ async fn handle_repository_event(
                 name: String,
                 head_sha: String,
                 status: octocrab::models::workflows::Status,
+                conclusion: Option<octocrab::models::workflows::Conclusion>,
             }
 
             let workflow_job_data: WorkflowJobData =
@@ -345,7 +346,18 @@ async fn handle_repository_event(
                     status: octocrab::models::workflows::Status::Queued,
                     started: chrono::Utc::now(),
                 })
-                .status = workflow_job_data.status;
+                .status = if let Some(conclusion) = workflow_job_data.conclusion {
+                match conclusion {
+                    octocrab::models::workflows::Conclusion::Success
+                    | octocrab::models::workflows::Conclusion::Neutral
+                    | octocrab::models::workflows::Conclusion::Skipped => {
+                        octocrab::models::workflows::Status::Completed
+                    }
+                    _ => octocrab::models::workflows::Status::Failed,
+                }
+            } else {
+                workflow_job_data.status
+            };
 
             sqlx::query("UPDATE github_messages SET workflow_status = ? WHERE id = ?")
                 .bind(serde_json::to_string(&github_message.workflow_status)?)

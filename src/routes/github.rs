@@ -52,7 +52,7 @@ async fn handle_repository_event(
         WebhookEventPayload::Push(push) => {
             let mut commit_string = String::new();
 
-            for commit in push.commits.iter() {
+            for commit in push.commits.iter().take(8) {
                 commit_string.push_str(&format!(
                     "[`{}`]({}) ({}): {}\n",
                     commit.id.chars().take(7).collect::<String>(),
@@ -60,6 +60,11 @@ async fn handle_repository_event(
                     commit.author.user.name,
                     commit.message.lines().next().unwrap_or_default()
                 ));
+            }
+
+            if push.commits.len() > 8 {
+                commit_string
+                    .push_str(&format!("-# ... {} more Commits\n", push.commits.len() - 8));
             }
 
             container_components.push(CreateContainerComponent::Section(CreateSection::new(
@@ -391,13 +396,20 @@ async fn handle_repository_event(
     if let Some((edit_github_message, run_id)) = edit_github_message {
         let mut commit_string = String::new();
 
-        for commit in edit_github_message.commits.iter() {
+        for commit in edit_github_message.commits.iter().take(8) {
             commit_string.push_str(&format!(
                 "[`{}`]({}) ({}): {}\n",
                 commit.id.chars().take(7).collect::<String>(),
                 commit.url,
                 commit.author.user.name,
                 commit.message.lines().next().unwrap_or_default()
+            ));
+        }
+
+        if edit_github_message.commits.len() > 8 {
+            commit_string.push_str(&format!(
+                "-# ... {} more Commits\n",
+                edit_github_message.commits.len() - 8
             ));
         }
 

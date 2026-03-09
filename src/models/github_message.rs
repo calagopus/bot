@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, Row, sqlite::SqliteRow};
 
 pub static MESSAGE_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+pub static MESSAGE_EDIT_LOCK: crate::utils::EvictingMutex = crate::utils::EvictingMutex::new();
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct WorkflowStatus {

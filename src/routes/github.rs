@@ -1,6 +1,6 @@
 use super::State;
 use crate::{
-    models::MESSAGE_LOCK,
+    models::{MESSAGE_EDIT_LOCK, MESSAGE_LOCK},
     response::{ApiResponse, ApiResponseResult},
 };
 use axum::http::StatusCode;
@@ -490,14 +490,21 @@ async fn handle_repository_event(
         ));
         let component = CreateComponent::Container(CreateContainer::new(container_components));
 
-        message
-            .edit(
-                &*state.bot.read().await,
-                serenity::all::EditMessage::new()
-                    .components(&[component])
-                    .flags(MessageFlags::IS_COMPONENTS_V2),
-            )
-            .await?;
+        if let Ok(edit_guard) = MESSAGE_EDIT_LOCK.acquire().await {
+            if let Err(err) = message
+                .edit(
+                    &*state.bot.read().await,
+                    serenity::all::EditMessage::new()
+                        .components(&[component])
+                        .flags(MessageFlags::IS_COMPONENTS_V2),
+                )
+                .await
+            {
+                tracing::error!("failed to edit github message: {:?}", err);
+            }
+
+            drop(edit_guard);
+        }
 
         return ApiResponse::json(Response {}).ok();
     } else if !container_components.is_empty() {

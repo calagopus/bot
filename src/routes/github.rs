@@ -1,9 +1,4 @@
 use super::State;
-use crate::{
-    models::{MESSAGE_EDIT_LOCK, MESSAGE_LOCK},
-    response::{ApiResponse, ApiResponseResult},
-};
-use axum::http::StatusCode;
 use octocrab::models::webhook_events::{
     WebhookEventPayload,
     payload::{
@@ -11,37 +6,58 @@ use octocrab::models::webhook_events::{
         StarWebhookEventAction,
     },
 };
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serenity::all::{
     CreateButton, CreateComponent, CreateContainer, CreateContainerComponent, CreateMessage,
     CreateSection, CreateSectionAccessory, CreateSectionComponent, CreateSeparator,
     CreateTextDisplay, CreateThumbnail, CreateUnfurledMediaItem, MessageFlags,
 };
 use std::sync::LazyLock;
-use utoipa::ToSchema;
 use utoipa_axum::{router::OpenApiRouter, routes};
 
-#[derive(ToSchema, Serialize)]
-struct Response {}
+static GITHUB_TX: LazyLock<
+    tokio::sync::mpsc::UnboundedSender<(State, octocrab::models::webhook_events::WebhookEvent)>,
+> = LazyLock::new(|| {
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<(
+        State,
+        octocrab::models::webhook_events::WebhookEvent,
+    )>();
+
+    tokio::spawn(async move {
+        while let Some((state, event)) = rx.recv().await {
+            let result = if event.repository.is_some() {
+                handle_repository_event(&state, event).await
+            } else {
+                handle_organization_event(&state, event).await
+            };
+
+            if let Err(err) = result {
+                tracing::error!("failed to process github event: {:?}", err);
+            }
+        }
+    });
+
+    tx
+});
 
 async fn handle_repository_event(
     state: &State,
     event: octocrab::models::webhook_events::WebhookEvent,
-) -> ApiResponseResult {
+) -> Result<(), anyhow::Error> {
     let Some(organization) = event.organization else {
-        return ApiResponse::error("missing organization information in webhook payload")
-            .with_status(StatusCode::BAD_REQUEST)
-            .ok();
+        return Err(anyhow::anyhow!(
+            "missing organization information in webhook payload"
+        ));
     };
     let Some(repository) = event.repository else {
-        return ApiResponse::error("missing repository information in webhook payload")
-            .with_status(StatusCode::BAD_REQUEST)
-            .ok();
+        return Err(anyhow::anyhow!(
+            "missing repository information in webhook payload"
+        ));
     };
     let Some(sender) = event.sender else {
-        return ApiResponse::error("missing sender information in webhook payload")
-            .with_status(StatusCode::BAD_REQUEST)
-            .ok();
+        return Err(anyhow::anyhow!(
+            "missing sender information in webhook payload"
+        ));
     };
 
     let mut container_components = Vec::new();
@@ -97,7 +113,7 @@ async fn handle_repository_event(
 
                 let dedup_key = (*repository.id, *sender.id);
                 if STAR_DEDUP_CACHE.get(&dedup_key).await.is_some() {
-                    return ApiResponse::json(Response {}).ok();
+                    return Ok(());
                 }
 
                 STAR_DEDUP_CACHE.insert(dedup_key, ()).await;
@@ -132,7 +148,7 @@ async fn handle_repository_event(
 
                 let dedup_key = (*repository.id, *sender.id);
                 if UNSTAR_DEDUP_CACHE.get(&dedup_key).await.is_some() {
-                    return ApiResponse::json(Response {}).ok();
+                    return Ok(());
                 }
 
                 UNSTAR_DEDUP_CACHE.insert(dedup_key, ()).await;
@@ -334,7 +350,6 @@ async fn handle_repository_event(
             let workflow_job_data: WorkflowJobData =
                 serde_json::from_value(workflow_job.workflow_job)?;
 
-            let lock = MESSAGE_LOCK.lock().await;
             let mut github_message: crate::models::GithubMessage = sqlx::query_as(
                 "SELECT * FROM github_messages WHERE repository_id = ? AND workflow_sha = ?",
             )
@@ -369,12 +384,11 @@ async fn handle_repository_event(
                 .bind(github_message.id)
                 .execute(state.database.write())
                 .await?;
-            drop(lock);
 
             edit_github_message = Some((github_message, workflow_job_data.run_id));
         }
         _ => {
-            return ApiResponse::json(Response {}).ok();
+            return Ok(());
         }
     };
 
@@ -386,11 +400,10 @@ async fn handle_repository_event(
         .await?
         .guild()
     else {
-        tracing::error!(
+        return Err(anyhow::anyhow!(
             "github webhook channel ID {} is not a guild channel",
             state.env.github_channel_id
-        );
-        return ApiResponse::json(Response {}).ok();
+        ));
     };
 
     if let Some((edit_github_message, run_id)) = edit_github_message {
@@ -430,9 +443,7 @@ async fn handle_repository_event(
                 organization.avatar_url.to_string(),
             ))),
         )));
-        container_components.push(CreateContainerComponent::Separator(CreateSeparator::new(
-            true,
-        )));
+        container_components.push(CreateContainerComponent::Separator(CreateSeparator::new()));
 
         let mut workflow_status_string = String::new();
 
@@ -490,23 +501,16 @@ async fn handle_repository_event(
         ));
         let component = CreateComponent::Container(CreateContainer::new(container_components));
 
-        if let Ok(edit_guard) = MESSAGE_EDIT_LOCK.acquire().await {
-            if let Err(err) = message
-                .edit(
-                    &*state.bot.read().await,
-                    serenity::all::EditMessage::new()
-                        .components(&[component])
-                        .flags(MessageFlags::IS_COMPONENTS_V2),
-                )
-                .await
-            {
-                tracing::error!("failed to edit github message: {:?}", err);
-            }
+        message
+            .edit(
+                &*state.bot.read().await,
+                serenity::all::EditMessage::new()
+                    .components(&[component])
+                    .flags(MessageFlags::IS_COMPONENTS_V2),
+            )
+            .await?;
 
-            drop(edit_guard);
-        }
-
-        return ApiResponse::json(Response {}).ok();
+        return Ok(());
     } else if !container_components.is_empty() {
         container_components.push(CreateContainerComponent::TextDisplay(
             CreateTextDisplay::new(format!(
@@ -539,13 +543,13 @@ async fn handle_repository_event(
         }
     }
 
-    ApiResponse::json(Response {}).ok()
+    Ok(())
 }
 
 async fn handle_organization_event(
     state: &State,
     event: octocrab::models::webhook_events::WebhookEvent,
-) -> ApiResponseResult {
+) -> Result<(), anyhow::Error> {
     let mut container_components = Vec::new();
     let mut channel_id = state.env.github_channel_id;
 
@@ -628,11 +632,10 @@ async fn handle_organization_event(
         .await?
         .guild()
     else {
-        tracing::error!(
+        return Err(anyhow::anyhow!(
             "github webhook channel ID {} is not a guild channel",
             channel_id
-        );
-        return ApiResponse::json(Response {}).ok();
+        ));
     };
 
     if !container_components.is_empty() {
@@ -648,14 +651,13 @@ async fn handle_organization_event(
             .await?;
     }
 
-    ApiResponse::json(Response {}).ok()
+    Ok(())
 }
 
 mod post {
-    use super::{handle_organization_event, handle_repository_event};
     use crate::{
         response::{ApiResponse, ApiResponseResult},
-        routes::{ApiError, GetState},
+        routes::{ApiError, GetState, github::GITHUB_TX},
     };
     use axum::http::StatusCode;
     use hmac::Mac;
@@ -725,11 +727,9 @@ mod post {
             return ApiResponse::json(Response {}).ok();
         }
 
-        if event.repository.is_some() {
-            handle_repository_event(&state, event).await
-        } else {
-            handle_organization_event(&state, event).await
-        }
+        GITHUB_TX.send((state.0, event))?;
+
+        ApiResponse::json(Response {}).ok()
     }
 }
 

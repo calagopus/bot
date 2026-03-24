@@ -47,7 +47,7 @@ pub async fn status_command(ctx: crate::BotContext<'_>) -> Result<(), anyhow::Er
                         CreateUnfurledMediaItem::new("https://demo.calagopus.com/icon.png"),
                     )),
                 )),
-                CreateContainerComponent::Separator(CreateSeparator::new(true)),
+                CreateContainerComponent::Separator(CreateSeparator::new()),
                 CreateContainerComponent::ActionRow(CreateActionRow::Buttons(
                     (&[
                         CreateButton::new_link("https://calagopus.com").label("Website"),

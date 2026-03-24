@@ -118,7 +118,7 @@ impl TextMessage {
             }
 
             container_components.push(serenity::all::CreateContainerComponent::Separator(
-                serenity::all::CreateSeparator::new(true),
+                serenity::all::CreateSeparator::new(),
             ));
             container_components.push(serenity::all::CreateContainerComponent::ActionRow(
                 serenity::all::CreateActionRow::SelectMenu(

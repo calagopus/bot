@@ -68,6 +68,10 @@ async fn handle_request(
 async fn main() {
     let (_env_guard, env) = env::Env::parse();
 
+    rustls::crypto::aws_lc_rs::default_provider()
+        .install_default()
+        .expect("Failed to install rustls crypto provider");
+
     let _guard = sentry::init((
         env.sentry_url.clone(),
         sentry::ClientOptions {

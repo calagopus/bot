@@ -296,6 +296,7 @@ dependencies = [
  "moka",
  "octocrab",
  "poise",
+ "rustls",
  "sentry",
  "sentry-anyhow",
  "sentry-tower",

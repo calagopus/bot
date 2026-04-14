@@ -10,7 +10,9 @@ pub struct Env {
 
     pub github_channel_id: u64,
     pub github_sponsors_channel_id: Option<u64>,
+    pub github_sponsors_login: Option<String>,
     pub github_verify_token: String,
+    pub github_token: Option<String>,
 
     pub bot_token: String,
 
@@ -52,10 +54,16 @@ impl Env {
                 .unwrap_or("".to_string())
                 .parse()
                 .ok(),
+            github_sponsors_login: std::env::var("GITHUB_SPONSORS_LOGIN")
+                .ok()
+                .map(|s| s.trim_matches('"').to_string()),
             github_verify_token: std::env::var("GITHUB_VERIFY_TOKEN")
                 .expect("GITHUB_VERIFY_TOKEN is required")
                 .trim_matches('"')
                 .to_string(),
+            github_token: std::env::var("GITHUB_TOKEN")
+                .ok()
+                .map(|s| s.trim_matches('"').to_string()),
 
             bot_token: std::env::var("BOT_TOKEN")
                 .expect("BOT_TOKEN is required")

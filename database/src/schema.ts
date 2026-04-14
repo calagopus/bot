@@ -30,3 +30,10 @@ export const textMessages = sqliteTable('text_messages', {
 }, (textMessages) => [
 	uniqueIndex('text_messages_message_id_idx').on(textMessages.messageId).where(isNotNull(textMessages.messageId))
 ])
+
+export const sentSponsorships = sqliteTable('sent_sponsorships', {
+	id: text('id').primaryKey().notNull(),
+	created: integer('created', { mode: 'timestamp' }).default(sql`(strftime('%s','now'))`).notNull(),
+}, (sentSponsorships) => [
+	index('sent_sponsorships_created_idx').on(sentSponsorships.created)
+])

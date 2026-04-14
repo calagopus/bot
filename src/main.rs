@@ -28,6 +28,7 @@ mod modals;
 mod models;
 mod response;
 mod routes;
+mod sponsors;
 mod utils;
 
 #[global_allocator]
@@ -140,8 +141,13 @@ async fn main() {
     *state.bot.write().await = client.http.clone();
 
     tokio::spawn(async move {
-        client.start().await.unwrap();
+        if let Err(err) = client.start().await {
+            tracing::error!("bot encountered error: {:?}", err);
+            sentry::capture_error(&err);
+        }
     });
+
+    sponsors::spawn_sponsor_updates_task(state.clone());
 
     let app = OpenApiRouter::new()
         .nest("/api", routes::router(&state))

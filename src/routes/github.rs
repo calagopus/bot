@@ -553,6 +553,10 @@ async fn handle_organization_event(
     let mut container_components = Vec::new();
     let mut channel_id = state.env.github_channel_id;
 
+    if state.env.github_token.is_some() {
+        return Ok(());
+    }
+
     if let WebhookEventPayload::Sponsorship(sponsorship) = event.specific
         && sponsorship.action == SponsorshipWebhookEventAction::Created
     {

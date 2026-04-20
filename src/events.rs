@@ -1,4 +1,10 @@
-use serenity::all::{ActivityData, Event, Interaction, ReactionType};
+use std::{
+    collections::HashMap,
+    sync::{Arc, LazyLock},
+};
+
+use serenity::all::{ActivityData, Event, Interaction, ReactionType, Timestamp, UserId};
+use tokio::{sync::Mutex, time};
 
 pub struct EventHandler {
     pub components: crate::components::ComponentList,
@@ -43,6 +49,79 @@ impl serenity::all::RawEventHandler for EventHandler {
                             .message
                             .react(&ctx.http, ReactionType::Unicode('👋'.into()))
                             .await?;
+                    }
+
+                    let Some(guild_id) = event.message.guild_id else {
+                        return Ok(());
+                    };
+
+                    for mention in &event.message.mentions {
+                        if state.env.antimention_user_ids.contains(&mention.id.get())
+                            && !state
+                                .env
+                                .antimention_user_ids
+                                .contains(&event.message.author.id.get())
+                            && let Ok(mut member) =
+                                guild_id.member(&ctx.http, event.message.author.id).await
+                        {
+                            for role_id in &state.env.antimention_whitelisted_role_ids {
+                                if member.roles.contains(&(*role_id).into()) {
+                                    return Ok(());
+                                }
+                            }
+
+                            static TIMEOUT_MAP: LazyLock<Arc<Mutex<HashMap<UserId, u32>>>> =
+                                LazyLock::new(|| {
+                                    let map = Arc::new(Mutex::new(HashMap::new()));
+
+                                    tokio::spawn({
+                                        let map = Arc::clone(&map);
+                                        async move {
+                                            loop {
+                                                time::sleep(time::Duration::from_hours(6)).await;
+                                                let mut map = map.lock().await;
+                                                map.retain(|_, count| *count > 0);
+                                                for count in map.values_mut() {
+                                                    if *count > 0 {
+                                                        *count -= 1;
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    });
+
+                                    map
+                                });
+
+                            let mut timeout_map = TIMEOUT_MAP.lock().await;
+                            let timeout_count = timeout_map.entry(mention.id).or_insert(0);
+                            *timeout_count += 1;
+                            let timeout_duration = match *timeout_count {
+                                1 | 2 => 30,
+                                3 | 4 => 60,
+                                5 => 300,
+                                6 => 600,
+                                _ => 3600,
+                            };
+                            drop(timeout_map);
+
+                            let timestamp = match Timestamp::from_unix_timestamp(
+                                chrono::Utc::now().timestamp() + timeout_duration,
+                            ) {
+                                Ok(t) => t,
+                                Err(_) => return Ok(()),
+                            };
+
+                            member
+                                .disable_communication_until(&ctx.http, timestamp)
+                                .await?;
+                            event
+                                .message
+                                .reply_ping(&ctx.http, "👋 Hey, please do not mention this person. You have been temporarily timed out, repeated offenses will result in longer timeouts.")
+                                .await?;
+
+                            break;
+                        }
                     }
                 }
                 Event::InteractionCreate(event) => {

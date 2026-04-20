@@ -8,6 +8,9 @@ pub struct Env {
     pub database_url: String,
     pub database_migrate: bool,
 
+    pub antimention_user_ids: Vec<u64>,
+    pub antimention_whitelisted_role_ids: Vec<u64>,
+
     pub github_channel_id: u64,
     pub github_sponsors_channel_id: Option<u64>,
     pub github_sponsors_login: Option<String>,
@@ -43,6 +46,17 @@ impl Env {
                 .trim_matches('"')
                 .parse()
                 .unwrap(),
+
+            antimention_user_ids: std::env::var("ANTIMENTION_USER_IDS")
+                .unwrap_or("".to_string())
+                .split(',')
+                .filter_map(|s| s.trim().parse().ok())
+                .collect(),
+            antimention_whitelisted_role_ids: std::env::var("ANTIMENTION_WHITELISTED_ROLE_IDS")
+                .unwrap_or("".to_string())
+                .split(',')
+                .filter_map(|s| s.trim().parse().ok())
+                .collect(),
 
             github_channel_id: std::env::var("GITHUB_CHANNEL_ID")
                 .expect("GITHUB_CHANNEL_ID is required")

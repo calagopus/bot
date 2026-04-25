@@ -94,7 +94,8 @@ impl serenity::all::RawEventHandler for EventHandler {
                                 });
 
                             let mut timeout_map = TIMEOUT_MAP.lock().await;
-                            let timeout_count = timeout_map.entry(mention.id).or_insert(0);
+                            let timeout_count =
+                                timeout_map.entry(event.message.author.id).or_insert(0);
                             *timeout_count += 1;
                             let timeout_duration = match *timeout_count {
                                 1 | 2 => 30,

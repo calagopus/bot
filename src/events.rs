@@ -55,21 +55,21 @@ impl serenity::all::RawEventHandler for EventHandler {
                         return Ok(());
                     };
 
-                    for mention in &event.message.mentions {
-                        if state.env.antimention_user_ids.contains(&mention.id.get())
-                            && !state
-                                .env
-                                .antimention_user_ids
-                                .contains(&event.message.author.id.get())
-                            && let Ok(mut member) =
-                                guild_id.member(&ctx.http, event.message.author.id).await
-                        {
-                            for role_id in &state.env.antimention_whitelisted_role_ids {
-                                if member.roles.contains(&(*role_id).into()) {
-                                    return Ok(());
-                                }
-                            }
+                    let Ok(mut member) = guild_id.member(&ctx.http, event.message.author.id).await
+                    else {
+                        return Ok(());
+                    };
 
+                    for role_id in &state.env.antimention_whitelisted_role_ids {
+                        if member.roles.contains(&(*role_id).into()) {
+                            return Ok(());
+                        }
+                    }
+
+                    for user_id in &state.env.antimention_user_ids {
+                        if event.message.content.contains(&format!("<@{}>", user_id))
+                            || event.message.content.contains(&format!("<@!{}>", user_id))
+                        {
                             static TIMEOUT_MAP: LazyLock<Arc<Mutex<HashMap<UserId, u32>>>> =
                                 LazyLock::new(|| {
                                     let map = Arc::new(Mutex::new(HashMap::new()));

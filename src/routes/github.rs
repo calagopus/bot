@@ -23,16 +23,26 @@ static GITHUB_TX: LazyLock<
         octocrab::models::webhook_events::WebhookEvent,
     )>();
 
+    let requeue_tx = tx.clone();
     tokio::spawn(async move {
         while let Some((state, event)) = rx.recv().await {
             let result = if event.repository.is_some() {
-                handle_repository_event(&state, event).await
+                handle_repository_event(&state, event.clone()).await
             } else {
-                handle_organization_event(&state, event).await
+                handle_organization_event(&state, event.clone()).await
             };
 
             if let Err(err) = result {
                 tracing::error!("failed to process github event: {:?}", err);
+
+                let requeue_tx = requeue_tx.clone();
+                tokio::spawn(async move {
+                    tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+
+                    if let Err(err) = requeue_tx.send((state, event)) {
+                        tracing::error!("failed to requeue github event: {:?}", err);
+                    }
+                });
             }
         }
     });
@@ -664,7 +674,7 @@ mod post {
         routes::{ApiError, GetState, github::GITHUB_TX},
     };
     use axum::http::StatusCode;
-    use hmac::Mac;
+    use hmac::{KeyInit, Mac};
     use serde::Serialize;
     use utoipa::ToSchema;
 

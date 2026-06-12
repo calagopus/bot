@@ -77,8 +77,8 @@ pub async fn admin_text_message_add_command(
         "INSERT INTO text_messages (channel_id, title, content, roles) VALUES (?, ?, ?, ?) RETURNING *",
     )
     .bind(channel.id.get() as i64)
-    .bind(&data.title)
-    .bind(&data.content)
+    .bind(data.title.as_str())
+    .bind(data.content.as_str())
     .bind(serde_json::to_string(&roles)?)
     .fetch_one(ctx.data().database.write())
     .await?;
@@ -145,9 +145,9 @@ pub async fn admin_text_message_update_command(
     let Some(data) = TextMessageModifyModal::execute_with_defaults(
         ctx,
         TextMessageModifyModal {
-            title: text_message.title,
-            content: text_message.content,
-            roles: Some(roles),
+            title: text_message.title.try_into()?,
+            content: text_message.content.try_into()?,
+            roles: Some(roles.try_into()?),
         },
     )
     .await?
@@ -157,8 +157,8 @@ pub async fn admin_text_message_update_command(
 
     ctx.defer_ephemeral().await?;
 
-    text_message.title = data.title;
-    text_message.content = data.content;
+    text_message.title = data.title.into();
+    text_message.content = data.content.into();
     text_message.roles = data
         .roles
         .unwrap_or_default()
@@ -167,8 +167,8 @@ pub async fn admin_text_message_update_command(
         .collect();
 
     sqlx::query("UPDATE text_messages SET title = ?, content = ?, roles = ? WHERE id = ?")
-        .bind(&text_message.title)
-        .bind(&text_message.content)
+        .bind(text_message.title.as_str())
+        .bind(text_message.content.as_str())
         .bind(serde_json::to_string(&text_message.roles)?)
         .bind(text_message.id)
         .execute(ctx.data().database.write())

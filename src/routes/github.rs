@@ -16,16 +16,19 @@ use std::sync::LazyLock;
 use utoipa_axum::{router::OpenApiRouter, routes};
 
 static GITHUB_TX: LazyLock<
-    tokio::sync::mpsc::UnboundedSender<(State, octocrab::models::webhook_events::WebhookEvent)>,
+    tokio::sync::mpsc::UnboundedSender<(State, octocrab::models::webhook_events::WebhookEvent, u8)>,
 > = LazyLock::new(|| {
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<(
         State,
         octocrab::models::webhook_events::WebhookEvent,
+        u8,
     )>();
 
     let requeue_tx = tx.clone();
     tokio::spawn(async move {
-        while let Some((state, event)) = rx.recv().await {
+        const MAX_ATTEMPTS: u8 = 3;
+
+        while let Some((state, event, attempt)) = rx.recv().await {
             let result = if event.repository.is_some() {
                 handle_repository_event(&state, event.clone()).await
             } else {
@@ -33,16 +36,23 @@ static GITHUB_TX: LazyLock<
             };
 
             if let Err(err) = result {
-                tracing::error!("failed to process github event: {:?}", err);
+                tracing::error!(
+                    "failed to process github event (attempt {attempt}/{MAX_ATTEMPTS}): {:?}",
+                    err
+                );
 
-                let requeue_tx = requeue_tx.clone();
-                tokio::spawn(async move {
-                    tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+                if attempt < MAX_ATTEMPTS {
+                    let requeue_tx = requeue_tx.clone();
+                    tokio::spawn(async move {
+                        tokio::time::sleep(std::time::Duration::from_secs(10)).await;
 
-                    if let Err(err) = requeue_tx.send((state, event)) {
-                        tracing::error!("failed to requeue github event: {:?}", err);
-                    }
-                });
+                        if let Err(err) = requeue_tx.send((state, event, attempt + 1)) {
+                            tracing::error!("failed to requeue github event: {:?}", err);
+                        }
+                    });
+                } else {
+                    tracing::error!("giving up on github event after {attempt} attempts");
+                }
             }
         }
     });
@@ -741,7 +751,7 @@ mod post {
             return ApiResponse::json(Response {}).ok();
         }
 
-        GITHUB_TX.send((state.0, event))?;
+        GITHUB_TX.send((state.0, event, 1))?;
 
         ApiResponse::json(Response {}).ok()
     }

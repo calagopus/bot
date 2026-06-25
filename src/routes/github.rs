@@ -378,15 +378,16 @@ async fn handle_repository_event(
             .fetch_one(state.database.read())
             .await?;
 
-            github_message
+            let entry = github_message
                 .workflow_status
                 .entry(workflow_job_data.id)
                 .or_insert_with(|| crate::models::WorkflowStatus {
                     name: workflow_job_data.name,
                     status: octocrab::models::workflows::Status::Queued,
                     started: chrono::Utc::now(),
-                })
-                .status = if let Some(conclusion) = workflow_job_data.conclusion {
+                });
+
+            let status = if let Some(conclusion) = workflow_job_data.conclusion {
                 match conclusion {
                     octocrab::models::workflows::Conclusion::Success
                     | octocrab::models::workflows::Conclusion::Neutral
@@ -396,8 +397,23 @@ async fn handle_repository_event(
                     _ => octocrab::models::workflows::Status::Failed,
                 }
             } else {
-                workflow_job_data.status
+                match (&entry.status, &workflow_job_data.status) {
+                    (octocrab::models::workflows::Status::Completed, _) => {
+                        octocrab::models::workflows::Status::Completed
+                    }
+                    (octocrab::models::workflows::Status::Failed, _) => {
+                        octocrab::models::workflows::Status::Failed
+                    }
+                    (
+                        octocrab::models::workflows::Status::InProgress,
+                        octocrab::models::workflows::Status::Queued
+                        | octocrab::models::workflows::Status::Pending
+                        | octocrab::models::workflows::Status::Waiting,
+                    ) => octocrab::models::workflows::Status::InProgress,
+                    _ => workflow_job_data.status,
+                }
             };
+            entry.status = status;
 
             sqlx::query("UPDATE github_messages SET workflow_status = ? WHERE id = ?")
                 .bind(serde_json::to_string(&github_message.workflow_status)?)

@@ -35,6 +35,10 @@ export const textMessages = sqliteTable('text_messages', {
 
 export const sentSponsorships = sqliteTable('sent_sponsorships', {
 	id: text('id').primaryKey().notNull(),
+
+	githubId: integer('github_id'),
+	amount: integer('amount'),
+
 	created: integer('created', { mode: 'timestamp' }).default(sql`(strftime('%s','now'))`).notNull(),
 }, (sentSponsorships) => [
 	index('sent_sponsorships_created_idx').on(sentSponsorships.created)

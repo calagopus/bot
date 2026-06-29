@@ -8,6 +8,7 @@ use serenity::all::{
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GitHubSponsor {
+    pub database_id: Option<i64>,
     pub login: String,
     pub name: Option<String>,
     pub avatar_url: String,
@@ -80,12 +81,14 @@ fn graphql_query(env: &crate::env::Env, after: Option<&str>) -> String {
                         }}
                         sponsor {{
                             ... on User {{
+                                databaseId
                                 login
                                 avatarUrl
                                 name
                                 url
                             }}
                             ... on Organization {{
+                                databaseId
                                 login
                                 avatarUrl
                                 name
@@ -156,10 +159,26 @@ pub fn spawn_sponsor_updates_task(state: crate::routes::State) {
                 let sponsors = collect_sponsors(&state.env).await?;
 
                 for sponsor in sponsors {
+                    let amount_in_cents = sponsor
+                        .sponsors_tier
+                        .as_ref()
+                        .map(|t| t.monthly_price_in_cents as i64);
+                    let monthly_price_in_dollars = amount_in_cents.unwrap_or(0) as f64 / 100.0;
+
                     if let Ok(sponsorship) =
                         crate::models::find_sent_sponsorship(state.database.read(), &sponsor.id)
                             .await
                     {
+                        if sponsorship.github_id.is_none() && sponsorship.amount.is_none() {
+                            crate::models::backfill_sent_sponsorship(
+                                state.database.write(),
+                                &sponsor.id,
+                                sponsor.sponsor.database_id,
+                                amount_in_cents,
+                            )
+                            .await?;
+                        }
+
                         tracing::debug!(
                             "sponsorship {} already sent (from: {:?})",
                             sponsorship.id,
@@ -167,15 +186,6 @@ pub fn spawn_sponsor_updates_task(state: crate::routes::State) {
                         );
                         continue;
                     }
-
-                    let monthly_price_in_dollars = sponsor
-                        .sponsors_tier
-                        .unwrap_or(GitHubSponsorsTier {
-                            monthly_price_in_cents: 0,
-                        })
-                        .monthly_price_in_cents
-                        as f64
-                        / 100.0;
 
                     tracing::info!(
                         "new sponsor: {} ({}), tier: ${:.2}",
@@ -245,6 +255,8 @@ pub fn spawn_sponsor_updates_task(state: crate::routes::State) {
                     crate::models::insert_sent_sponsorship(
                         state.database.write(),
                         &sponsor.id,
+                        sponsor.sponsor.database_id,
+                        amount_in_cents,
                         Some(sponsor.timestamp),
                     )
                     .await?;

@@ -16,6 +16,7 @@ pub struct GithubMessage {
     pub message_id: i64,
 
     pub commits: Vec<PushWebhookEventCommit>,
+    pub branch: String,
 
     pub workflow_status: indexmap::IndexMap<i64, WorkflowStatus>,
 }
@@ -31,6 +32,7 @@ impl FromRow<'_, SqliteRow> for GithubMessage {
                     source: Box::new(e),
                 }
             })?,
+            branch: row.try_get("branch")?,
             workflow_status: serde_json::from_str(&row.try_get::<String, _>("workflow_status")?)
                 .map_err(|e| sqlx::Error::ColumnDecode {
                     index: "workflow_status".into(),

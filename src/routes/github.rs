@@ -86,6 +86,12 @@ async fn handle_repository_event(
 
     match event.specific {
         WebhookEventPayload::Push(push) => {
+            let branch = push
+                .r#ref
+                .strip_prefix("refs/heads/")
+                .unwrap_or(&push.r#ref)
+                .to_string();
+
             let mut commit_string = String::new();
 
             for commit in push.commits.iter().take(8) {
@@ -106,9 +112,10 @@ async fn handle_repository_event(
             container_components.push(CreateContainerComponent::Section(CreateSection::new(
                 vec![
                     CreateSectionComponent::TextDisplay(CreateTextDisplay::new(format!(
-                        "## <:package:1150890021516234832> {} Commit{} pushed",
+                        "## <:package:1150890021516234832> {} Commit{} pushed to `{}`",
                         push.commits.len(),
-                        if push.commits.len() == 1 { "" } else { "s" }
+                        if push.commits.len() == 1 { "" } else { "s" },
+                        branch
                     ))),
                     CreateSectionComponent::TextDisplay(CreateTextDisplay::new(commit_string)),
                 ],
@@ -118,7 +125,7 @@ async fn handle_repository_event(
             )));
 
             if let Some(head_commit) = push.head_commit {
-                create_github_message = Some((head_commit, push.commits));
+                create_github_message = Some((head_commit, push.commits, branch));
             }
         }
         WebhookEventPayload::Star(star) => match star.action {
@@ -465,13 +472,14 @@ async fn handle_repository_event(
         container_components.push(CreateContainerComponent::Section(CreateSection::new(
             vec![
                 CreateSectionComponent::TextDisplay(CreateTextDisplay::new(format!(
-                    "## <:package:1150890021516234832> {} Commit{} pushed",
+                    "## <:package:1150890021516234832> {} Commit{} pushed to `{}`",
                     edit_github_message.commits.len(),
                     if edit_github_message.commits.len() == 1 {
                         ""
                     } else {
                         "s"
-                    }
+                    },
+                    edit_github_message.branch
                 ))),
                 CreateSectionComponent::TextDisplay(CreateTextDisplay::new(commit_string)),
             ],
@@ -567,11 +575,12 @@ async fn handle_repository_event(
             )
             .await?;
 
-        if let Some((head_commit, commits)) = create_github_message {
-            sqlx::query("INSERT INTO github_messages (repository_id, message_id, commits, workflow_sha, workflow_status) VALUES (?, ?, ?, ?, ?)")
+        if let Some((head_commit, commits, branch)) = create_github_message {
+            sqlx::query("INSERT INTO github_messages (repository_id, message_id, commits, branch, workflow_sha, workflow_status) VALUES (?, ?, ?, ?, ?, ?)")
                 .bind(*repository.id as i64)
                 .bind(message.id.get() as i64)
                 .bind(serde_json::to_string(&commits)?)
+                .bind(branch)
                 .bind(head_commit.id)
                 .bind("{}")
                 .execute(state.database.write())

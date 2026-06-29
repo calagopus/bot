@@ -1,0 +1,1 @@
+ALTER TABLE `github_messages` ADD `branch` text DEFAULT '' NOT NULL;

@@ -8,6 +8,8 @@ export const githubMessages = sqliteTable('github_messages', {
 
 	commits: text('commits', { mode: 'json' }).notNull(),
 
+	branch: text('branch').default('').notNull(),
+
 	workflowSha: text('workflow_sha').notNull(),
 	workflowStatus: text('workflow_status', { mode: 'json' }).notNull(),
 

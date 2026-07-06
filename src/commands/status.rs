@@ -44,7 +44,7 @@ pub async fn status_command(ctx: crate::BotContext<'_>) -> Result<(), anyhow::Er
                         ))),
                     ],
                     CreateSectionAccessory::Thumbnail(CreateThumbnail::new(
-                        CreateUnfurledMediaItem::new("https://demo.calagopus.com/icon.png"),
+                        CreateUnfurledMediaItem::new("https://calagopus.com/logo.png"),
                     )),
                 )),
                 CreateContainerComponent::Separator(CreateSeparator::new()),

@@ -28,7 +28,7 @@ anyhow = "1.0.98"
 serenity = { git = "https://github.com/serenity-rs/serenity.git", branch = "next" }
 poise = { git = "https://github.com/meditationmind/poise.git", branch = "modal-derive-components" }
 async-trait = "0.1.89"
-octocrab = "0.53.1"
+octocrab = "0.54.0"
 futures = "0.3.31"
 sha2 = "0.11.0"
 hmac = "0.13.0"

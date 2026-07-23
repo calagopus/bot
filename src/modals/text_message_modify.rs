@@ -17,8 +17,8 @@ pub struct TextMessageModifyModal {
     pub content: FixedString<u16>,
     #[name = "Roles"]
     #[role_select]
-    #[min_length = 0]
-    #[max_length = 25]
+    #[min_values = 0]
+    #[max_values = 25]
     #[placeholder = "Select roles that can be selected by users"]
     pub roles: Option<FixedArray<Role>>,
 }

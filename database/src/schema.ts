@@ -39,7 +39,13 @@ export const sentSponsorships = sqliteTable('sent_sponsorships', {
 	githubId: integer('github_id'),
 	amount: integer('amount'),
 
+	messageId: integer('message_id'),
+	recurring: integer('recurring', { mode: 'boolean' }).default(false).notNull(),
+	ended: integer('ended', { mode: 'boolean' }).default(false).notNull(),
+	paid: integer('paid'),
+
 	created: integer('created', { mode: 'timestamp' }).default(sql`(strftime('%s','now'))`).notNull(),
 }, (sentSponsorships) => [
-	index('sent_sponsorships_created_idx').on(sentSponsorships.created)
+	index('sent_sponsorships_created_idx').on(sentSponsorships.created),
+	uniqueIndex('sent_sponsorships_message_id_idx').on(sentSponsorships.messageId).where(isNotNull(sentSponsorships.messageId))
 ])

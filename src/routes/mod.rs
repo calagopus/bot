@@ -5,6 +5,7 @@ use utoipa::ToSchema;
 use utoipa_axum::router::OpenApiRouter;
 
 mod github;
+mod sponsors;
 
 #[derive(ToSchema, Serialize)]
 pub struct ApiError<'a> {
@@ -37,5 +38,6 @@ pub type GetState = axum::extract::State<State>;
 pub fn router(state: &State) -> OpenApiRouter<State> {
     OpenApiRouter::new()
         .nest("/github", github::router(state))
+        .nest("/sponsors", sponsors::router(state))
         .with_state(state.clone())
 }

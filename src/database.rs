@@ -26,21 +26,18 @@ impl Database {
         };
 
         if env.database_migrate {
-            let writer = instance.sqlite.clone();
-            tokio::spawn(async move {
-                let start = std::time::Instant::now();
+            let start = std::time::Instant::now();
 
-                sqlx::migrate!("./database/migrations")
-                    .run(&writer)
-                    .await
-                    .unwrap();
+            sqlx::migrate!("./database/migrations")
+                .run(&instance.sqlite)
+                .await
+                .expect("Failed to migrate the database");
 
-                tracing::info!(
-                    "{} migrated {}",
-                    "database".bright_cyan(),
-                    format!("({}ms)", start.elapsed().as_millis()).bright_black()
-                );
-            });
+            tracing::info!(
+                "{} migrated {}",
+                "database".bright_cyan(),
+                format!("({}ms)", start.elapsed().as_millis()).bright_black()
+            );
         }
 
         instance

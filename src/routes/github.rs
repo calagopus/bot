@@ -767,10 +767,17 @@ mod post {
                 .ok();
         };
 
-        let event = octocrab::models::webhook_events::WebhookEvent::try_from_header_and_body(
-            event.to_str()?,
-            &data,
-        )?;
+        let event_name = event.to_str()?;
+        let event = match octocrab::models::webhook_events::WebhookEvent::try_from_header_and_body(
+            event_name, &data,
+        ) {
+            Ok(event) => event,
+            Err(err) => {
+                tracing::warn!("failed to parse github {event_name} event: {:?}", err);
+
+                return ApiResponse::json(Response {}).ok();
+            }
+        };
 
         if event.kind == octocrab::models::webhook_events::WebhookEventType::Ping {
             return ApiResponse::json(Response {}).ok();

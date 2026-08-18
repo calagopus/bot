@@ -68,7 +68,7 @@ fn monthly_components<'a>(
 
     let body = if spell.active() {
         format!(
-            "{} sponsors us monthly for `{}` — `{}` contributed over {}!",
+            "{} sponsors us monthly for `{}` - `{}` contributed over {}!",
             sponsor_link(spell),
             dollars(spell.monthly_in_cents),
             dollars(spell.paid_in_cents),
@@ -76,7 +76,7 @@ fn monthly_components<'a>(
         )
     } else {
         format!(
-            "{} sponsored us monthly for `{}` — `{}` contributed over {}.",
+            "{} sponsored us monthly for `{}` - `{}` contributed over {}.",
             sponsor_link(spell),
             dollars(spell.monthly_in_cents),
             dollars(spell.paid_in_cents),

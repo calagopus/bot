@@ -67,8 +67,9 @@ impl serenity::all::RawEventHandler for EventHandler {
                     }
 
                     for user_id in &state.env.antimention_user_ids {
-                        if event.message.content.contains(&format!("<@{}>", user_id))
-                            || event.message.content.contains(&format!("<@!{}>", user_id))
+                        if (event.message.content.contains(&format!("<@{}>", user_id))
+                            || event.message.content.contains(&format!("<@!{}>", user_id)))
+                            && !event.message.mentions_user_id((*user_id).into())
                         {
                             static TIMEOUT_MAP: LazyLock<Arc<Mutex<HashMap<UserId, u32>>>> =
                                 LazyLock::new(|| {

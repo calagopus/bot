@@ -9,7 +9,7 @@ use axum::{
     routing::get,
 };
 use colored::Colorize;
-use sentry_tower::SentryHttpLayer;
+use sentry_tower::{NewSentryLayer, SentryHttpLayer};
 use serenity::all::{GatewayIntents, Token};
 use std::{net::SocketAddr, str::FromStr, sync::Arc, time::Instant};
 use tikv_jemallocator::Jemalloc;
@@ -73,15 +73,14 @@ async fn main() {
         .install_default()
         .expect("Failed to install rustls crypto provider");
 
-    let _guard = sentry::init((
-        env.sentry_url.clone(),
-        sentry::ClientOptions {
-            server_name: env.server_name.clone().map(|s| s.into()),
-            release: Some(format!("{VERSION}:{GIT_COMMIT}@{GIT_BRANCH}").into()),
-            traces_sample_rate: 1.0,
-            ..Default::default()
-        },
-    ));
+    let mut sentry_options = sentry::ClientOptions::default()
+        .release(format!("{VERSION}:{GIT_COMMIT}@{GIT_BRANCH}"))
+        .traces_sample_rate(1.0);
+    if let Some(server_name) = env.server_name.clone() {
+        sentry_options = sentry_options.server_name(server_name);
+    }
+
+    let _guard = sentry::init((env.sentry_url.clone(), sentry_options));
 
     let env = Arc::new(env);
     let state = Arc::new(routes::InnerState {
@@ -163,6 +162,7 @@ async fn main() {
         .layer(CorsLayer::very_permissive())
         .layer(axum::middleware::from_fn(handle_request))
         .route_layer(SentryHttpLayer::new().enable_transaction())
+        .route_layer(NewSentryLayer::<Request>::new_from_top())
         .with_state(state.clone());
 
     let listener = tokio::net::TcpListener::bind(format!("{}:{}", state.env.bind, state.env.port))

@@ -17,6 +17,7 @@ pub struct Env {
     pub github_verify_token: String,
     pub github_token: Option<String>,
 
+    pub guild_id: Option<u64>,
     pub bot_token: String,
 
     pub bind: String,
@@ -79,6 +80,11 @@ impl Env {
                 .ok()
                 .map(|s| s.trim_matches('"').to_string()),
 
+            guild_id: std::env::var("GUILD_ID")
+                .map(|g| g.trim_matches('"').to_string())
+                .unwrap_or("".to_string())
+                .parse()
+                .ok(),
             bot_token: std::env::var("BOT_TOKEN")
                 .expect("BOT_TOKEN is required")
                 .trim_matches('"')

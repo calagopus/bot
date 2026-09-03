@@ -1,0 +1,1 @@
+ALTER TABLE `github_messages` ADD `compare` text DEFAULT '' NOT NULL;

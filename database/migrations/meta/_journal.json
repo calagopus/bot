@@ -36,6 +36,13 @@
       "when": 1786303450924,
       "tag": "0004_naive_argent",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1788419960229,
+      "tag": "0005_vengeful_omega_sentinel",
+      "breakpoints": true
     }
   ]
 }

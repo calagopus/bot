@@ -485,7 +485,7 @@ async fn sync_tier_roles(
     state: &crate::routes::State,
     evaluation: &Evaluation,
 ) -> Result<(), anyhow::Error> {
-    if crate::tiers::managed_role_ids(&state.env).is_empty() {
+    if !crate::tiers::is_configured(&state.env) {
         return Ok(());
     }
 
@@ -531,8 +531,7 @@ async fn run(state: &crate::routes::State, backfilled: &mut bool) -> Result<(), 
 
 pub fn spawn_sponsor_updates_task(state: crate::routes::State) {
     tokio::spawn(async move {
-        let tiers_configured =
-            !state.env.donator_tiers.is_empty() || !state.env.sponsor_tiers.is_empty();
+        let tiers_configured = crate::tiers::is_configured(&state.env);
 
         if state.env.github_sponsors_channel_id.is_none() && !tiers_configured {
             return;

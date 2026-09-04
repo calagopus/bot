@@ -21,6 +21,8 @@ pub struct Env {
 
     pub donator_tiers: Vec<crate::tiers::Tier>,
     pub sponsor_tiers: Vec<crate::tiers::Tier>,
+    pub donator_base_role_id: Option<u64>,
+    pub sponsor_base_role_id: Option<u64>,
 
     pub guild_id: Option<u64>,
     pub bot_token: String,
@@ -105,6 +107,16 @@ impl Env {
                     .unwrap_or("".to_string())
                     .trim_matches('"'),
             ),
+            donator_base_role_id: std::env::var("DONATOR_BASE_ROLE_ID")
+                .map(|r| r.trim_matches('"').to_string())
+                .unwrap_or("".to_string())
+                .parse()
+                .ok(),
+            sponsor_base_role_id: std::env::var("SPONSOR_BASE_ROLE_ID")
+                .map(|r| r.trim_matches('"').to_string())
+                .unwrap_or("".to_string())
+                .parse()
+                .ok(),
 
             guild_id: std::env::var("GUILD_ID")
                 .map(|g| g.trim_matches('"').to_string())

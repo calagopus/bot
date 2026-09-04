@@ -96,13 +96,11 @@ impl Env {
                 .filter(|s| !s.is_empty()),
 
             donator_tiers: crate::tiers::parse(
-                crate::tiers::TierKind::Donator,
                 std::env::var("DONATOR_TIERS")
                     .unwrap_or("".to_string())
                     .trim_matches('"'),
             ),
             sponsor_tiers: crate::tiers::parse(
-                crate::tiers::TierKind::Sponsor,
                 std::env::var("SPONSOR_TIERS")
                     .unwrap_or("".to_string())
                     .trim_matches('"'),

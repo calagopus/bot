@@ -1,59 +1,14 @@
 use serenity::all::{GuildId, RoleId, UserId};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TierKind {
-    Donator,
-    Sponsor,
-}
-
-impl TierKind {
-    #[inline]
-    fn label(self) -> &'static str {
-        match self {
-            Self::Donator => "Donator",
-            Self::Sponsor => "Sponsor",
-        }
-    }
-}
-
 #[derive(Debug, Clone)]
 pub struct Tier {
-    pub name: String,
     pub entry_in_cents: i64,
     pub role_id: u64,
 }
 
-fn roman(mut value: usize) -> String {
-    const NUMERALS: [(usize, &str); 13] = [
-        (1000, "M"),
-        (900, "CM"),
-        (500, "D"),
-        (400, "CD"),
-        (100, "C"),
-        (90, "XC"),
-        (50, "L"),
-        (40, "XL"),
-        (10, "X"),
-        (9, "IX"),
-        (5, "V"),
-        (4, "IV"),
-        (1, "I"),
-    ];
-
-    let mut roman = String::new();
-    for (amount, numeral) in NUMERALS {
-        while value >= amount {
-            roman.push_str(numeral);
-            value -= amount;
-        }
-    }
-
-    roman
-}
-
 /// Entries are `<entry amount in cents>:<discord role id>`, lowest entry amount first.
-/// The lowest tier is tier 0, which every sponsor above zero qualifies for.
-pub fn parse(kind: TierKind, raw: &str) -> Vec<Tier> {
+/// The lowest entry qualifies every sponsor above zero.
+pub fn parse(raw: &str) -> Vec<Tier> {
     let mut entries: Vec<(i64, u64)> = raw
         .split(',')
         .filter_map(|entry| {
@@ -70,12 +25,7 @@ pub fn parse(kind: TierKind, raw: &str) -> Vec<Tier> {
 
     entries
         .into_iter()
-        .enumerate()
-        .map(|(index, (entry_in_cents, role_id))| Tier {
-            name: match index {
-                0 => format!("{} Tier 0", kind.label()),
-                index => format!("{} Tier {}", kind.label(), roman(index)),
-            },
+        .map(|(entry_in_cents, role_id)| Tier {
             entry_in_cents,
             role_id,
         })

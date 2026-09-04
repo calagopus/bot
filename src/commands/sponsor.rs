@@ -24,14 +24,13 @@ fn tier_lines(tiers: &[crate::tiers::Tier]) -> String {
         .iter()
         .map(|tier| {
             format!(
-                "**{}** - {} <@&{}>",
-                tier.name,
+                "<@&{}> - {}",
+                tier.role_id,
                 if tier.entry_in_cents <= 0 {
                     "any amount".to_string()
                 } else {
                     format!("`{}`+", dollars(tier.entry_in_cents))
-                },
-                tier.role_id
+                }
             )
         })
         .collect::<Vec<_>>()
@@ -170,8 +169,7 @@ pub async fn sponsor_status_command(ctx: crate::BotContext<'_>) -> Result<(), an
         "One-time sponsor"
     };
 
-    let donator_tier = crate::tiers::resolve(&data.env.donator_tiers, sponsor.lifetime_in_cents);
-    let sponsor_tier = crate::tiers::resolve(&data.env.sponsor_tiers, sponsor.monthly_in_cents);
+    let roles = crate::tiers::earned_role_ids(&data.env, &evaluation, user.id);
 
     let avatar_url = match user.login.as_deref() {
         Some(login) => format!("https://github.com/{login}.png"),
@@ -184,11 +182,8 @@ pub async fn sponsor_status_command(ctx: crate::BotContext<'_>) -> Result<(), an
                 CreateSectionComponent::TextDisplay(CreateTextDisplay::new(HEADING_SPONSORSHIP)),
                 CreateSectionComponent::TextDisplay(CreateTextDisplay::new(format!(
                     "**Status**: {status}
-**Monthly**: `{}`{}",
-                    dollars(sponsor.monthly_in_cents),
-                    sponsor_tier
-                        .map(|tier| format!("\n**Sponsor tier**: {}", tier.name))
-                        .unwrap_or_default()
+**Monthly**: `{}`",
+                    dollars(sponsor.monthly_in_cents)
                 ))),
             ],
             CreateSectionAccessory::Thumbnail(CreateThumbnail::new(CreateUnfurledMediaItem::new(
@@ -203,9 +198,18 @@ pub async fn sponsor_status_command(ctx: crate::BotContext<'_>) -> Result<(), an
             dollars(sponsor.one_time_in_cents),
             dollars(sponsor.recurring_in_cents),
             dollars(sponsor.lifetime_in_cents),
-            donator_tier
-                .map(|tier| format!("\n**Donator tier**: {}", tier.name))
-                .unwrap_or_default()
+            if roles.is_empty() {
+                String::new()
+            } else {
+                format!(
+                    "\n**Roles**: {}",
+                    roles
+                        .iter()
+                        .map(|role_id| format!("<@&{role_id}>"))
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                )
+            }
         ))),
     ];
 

@@ -9,6 +9,7 @@ mod get {
     };
     use axum::http::StatusCode;
     use serde::Serialize;
+    use std::collections::HashMap;
     use utoipa::ToSchema;
 
     nestify::nest! {
@@ -35,6 +36,8 @@ mod get {
                 #[schema(inline)]
                 profile: Option<#[derive(ToSchema, Serialize)] struct ResponseSponsorProfile {
                     github_id: Option<i64>,
+                    #[schema(inline)]
+                    discord_user_id: Option<String>,
                     login: String,
                     name: Option<String>,
                     url: String,
@@ -81,6 +84,12 @@ mod get {
 
         let evaluation = evaluate(&ledger, chrono::Utc::now());
 
+        let linked: HashMap<i64, i64> = crate::models::linked_github_users(state.database.read())
+            .await?
+            .into_iter()
+            .filter_map(|user| Some((user.id, user.discord_user_id?)))
+            .collect();
+
         let mut sponsors: Vec<ResponseSponsor> = evaluation
             .sponsors
             .into_iter()
@@ -99,6 +108,10 @@ mod get {
                     status,
                     profile: sponsor.sponsor.map(|sponsor| ResponseSponsorProfile {
                         github_id: sponsor.database_id,
+                        discord_user_id: sponsor
+                            .database_id
+                            .and_then(|github_id| linked.get(&github_id))
+                            .map(|discord_user_id| (*discord_user_id as u64).to_string()),
                         login: sponsor.login,
                         name: sponsor.name,
                         url: sponsor.url,

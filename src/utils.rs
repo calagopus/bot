@@ -21,3 +21,26 @@ pub fn extract_ip(headers: &HeaderMap) -> Option<IpAddr> {
 
     ip.parse().ok()
 }
+
+pub async fn guild_id(
+    state: &crate::routes::InnerState,
+) -> Result<serenity::all::GuildId, anyhow::Error> {
+    if let Some(guild_id) = state.env.guild_id {
+        return Ok(serenity::all::GuildId::new(guild_id));
+    }
+
+    let http = state.bot.read().await.clone();
+
+    let Some(channel) = http
+        .get_channel(state.env.github_channel_id.into())
+        .await?
+        .guild()
+    else {
+        return Err(anyhow::anyhow!(
+            "github channel ID {} is not a guild channel",
+            state.env.github_channel_id
+        ));
+    };
+
+    Ok(channel.base.guild_id)
+}

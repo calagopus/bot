@@ -79,6 +79,7 @@ impl EvaluatedSpell {
 
 #[derive(Debug, Clone)]
 pub struct EvaluatedSponsor {
+    pub github_id: Option<i64>,
     pub sponsor: Option<GitHubSponsor>,
 
     pub active: bool,
@@ -210,6 +211,8 @@ pub fn evaluate(ledger: &Ledger, now: chrono::DateTime<chrono::Utc>) -> Evaluati
             continue;
         };
 
+        let github_id = sponsor.database_id;
+
         let mut recurring_in_cents = 0;
         let mut estimated_months_paid = 0;
         let mut monthly_in_cents = 0;
@@ -255,6 +258,7 @@ pub fn evaluate(ledger: &Ledger, now: chrono::DateTime<chrono::Utc>) -> Evaluati
         }
 
         evaluation.sponsors.push(EvaluatedSponsor {
+            github_id,
             sponsor: state.public.then_some(sponsor),
 
             active: recurring,

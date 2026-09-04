@@ -23,6 +23,18 @@ impl ApiResponse {
     }
 
     #[inline]
+    pub fn html(body: impl Into<axum::body::Body>) -> Self {
+        Self {
+            body: body.into(),
+            status: axum::http::StatusCode::OK,
+            headers: axum::http::HeaderMap::from_iter([(
+                axum::http::header::CONTENT_TYPE,
+                axum::http::HeaderValue::from_static("text/html; charset=utf-8"),
+            )]),
+        }
+    }
+
+    #[inline]
     pub fn error(err: &str) -> Self {
         Self::json(ApiError::new(&[err])).with_status(axum::http::StatusCode::BAD_REQUEST)
     }

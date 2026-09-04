@@ -26,9 +26,11 @@ mod env;
 mod events;
 mod modals;
 mod models;
+mod oauth;
 mod response;
 mod routes;
 mod sponsors;
+mod tiers;
 mod utils;
 
 #[global_allocator]

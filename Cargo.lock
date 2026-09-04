@@ -291,7 +291,7 @@ dependencies = [
 
 [[package]]
 name = "bot-rs"
-version = "0.6.3"
+version = "0.7.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -307,6 +307,7 @@ dependencies = [
  "nestify",
  "octocrab",
  "poise",
+ "rand 0.10.2",
  "reqwest",
  "rustls",
  "sentry",

@@ -34,10 +34,22 @@ export const textMessages = sqliteTable('text_messages', {
 	uniqueIndex('text_messages_message_id_idx').on(textMessages.messageId).where(isNotNull(textMessages.messageId))
 ])
 
+export const githubUsers = sqliteTable('github_users', {
+	id: integer('id').primaryKey().notNull(),
+
+	login: text('login'),
+
+	discordUserId: integer('discord_user_id'),
+
+	created: integer('created', { mode: 'timestamp' }).default(sql`(strftime('%s','now'))`).notNull(),
+}, (githubUsers) => [
+	uniqueIndex('github_users_discord_user_id_idx').on(githubUsers.discordUserId).where(isNotNull(githubUsers.discordUserId))
+])
+
 export const sentSponsorships = sqliteTable('sent_sponsorships', {
 	id: text('id').primaryKey().notNull(),
 
-	githubId: integer('github_id'),
+	githubId: integer('github_id').references(() => githubUsers.id, { onDelete: 'set null' }),
 	amount: integer('amount'),
 
 	messageId: integer('message_id'),

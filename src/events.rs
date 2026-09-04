@@ -18,16 +18,7 @@ impl serenity::all::RawEventHandler for EventHandler {
         let run = async || -> Result<(), anyhow::Error> {
             match event {
                 Event::Ready(event) => {
-                    if !state.env.app_debug {
-                        poise::builtins::register_globally(
-                            &ctx.http,
-                            crate::commands::commands(crate::commands::CommandList::new())
-                                .into_vec()
-                                .iter(),
-                        )
-                        .await
-                        .ok();
-                    }
+                    crate::commands::register_commands(&ctx.http).await?;
 
                     ctx.set_presence(
                         Some(ActivityData::custom("Playing with Rust Code")),

@@ -43,6 +43,13 @@
       "when": 1788419960229,
       "tag": "0005_vengeful_omega_sentinel",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1788510583570,
+      "tag": "0006_sleepy_demogoblin",
+      "breakpoints": true
     }
   ]
 }

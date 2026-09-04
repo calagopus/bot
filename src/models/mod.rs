@@ -4,3 +4,5 @@ mod text_message;
 pub use text_message::*;
 mod sent_sponsorship;
 pub use sent_sponsorship::*;
+mod github_user;
+pub use github_user::*;

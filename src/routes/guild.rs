@@ -9,7 +9,6 @@ mod get {
     use axum::http::StatusCode;
     use indexmap::IndexMap;
     use serde::Serialize;
-    use serenity::all::GuildId;
     use std::sync::{Arc, LazyLock};
     use utoipa::ToSchema;
 
@@ -60,24 +59,7 @@ mod get {
 
     async fn collect_stats(state: &crate::routes::State) -> Result<Response, anyhow::Error> {
         let http = state.bot.read().await.clone();
-
-        let guild_id = match state.env.guild_id {
-            Some(guild_id) => GuildId::new(guild_id),
-            None => {
-                let Some(channel) = http
-                    .get_channel(state.env.github_channel_id.into())
-                    .await?
-                    .guild()
-                else {
-                    return Err(anyhow::anyhow!(
-                        "github channel ID {} is not a guild channel",
-                        state.env.github_channel_id
-                    ));
-                };
-
-                channel.base.guild_id
-            }
-        };
+        let guild_id = crate::utils::guild_id(state).await?;
 
         let (guild, channels) = tokio::try_join!(
             http.get_guild_with_counts(guild_id),

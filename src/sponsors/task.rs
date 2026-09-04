@@ -1,16 +1,19 @@
-use super::{EvaluatedSpell, SponsorsActivityAction, evaluate, refresh_ledger, sponsors_login};
+use super::{
+    EvaluatedSpell, Evaluation, GithubSponsorshipNode, Ledger, SponsorsActivityAction, evaluate,
+    refresh_ledger, sponsors_login,
+};
 use serenity::all::{
     Component, ContainerComponent, CreateComponent, CreateContainer, CreateContainerComponent,
     CreateMessage, CreateSection, CreateSectionAccessory, CreateSectionComponent,
     CreateTextDisplay, CreateThumbnail, CreateUnfurledMediaItem, EditMessage, GenericChannelId,
-    MessageFlags, MessagePagination, Section, SectionComponent, nonmax::NonMaxU8,
+    MessageFlags, MessagePagination, Section, SectionComponent, UserId, nonmax::NonMaxU8,
 };
 
 const HEADING_ONE_TIME: &str = "## <:cash:1150889514236137605> Sponsorship received";
 const HEADING_MONTHLY: &str = "## <:cash:1150889514236137605> Monthly sponsorship";
 const HEADING_MONTHLY_ENDED: &str = "## <:cash:1150889514236137605> Monthly sponsorship ended";
 
-fn dollars(cents: i64) -> String {
+pub fn dollars(cents: i64) -> String {
     format!("${:.2}", cents as f64 / 100.0)
 }
 
@@ -251,14 +254,31 @@ async fn backfill_message_ids(
     Ok(())
 }
 
-async fn run(
+async fn ensure_github_user(
+    state: &crate::routes::State,
+    activity: &GithubSponsorshipNode,
+) -> Result<Option<i64>, anyhow::Error> {
+    let Some(sponsor) = activity.sponsor.as_ref() else {
+        return Ok(None);
+    };
+
+    let Some(github_id) = sponsor.database_id else {
+        return Ok(None);
+    };
+
+    crate::models::upsert_github_user(state.database.write(), github_id, Some(&sponsor.login))
+        .await?;
+
+    Ok(Some(github_id))
+}
+
+async fn announce(
     state: &crate::routes::State,
     channel_id: u64,
     backfilled: &mut bool,
+    ledger: &Ledger,
+    evaluation: &Evaluation,
 ) -> Result<(), anyhow::Error> {
-    let ledger = refresh_ledger(&state.env).await?;
-    let evaluation = evaluate(&ledger, chrono::Utc::now());
-
     let announceable = ledger
         .activities
         .iter()
@@ -277,11 +297,13 @@ async fn run(
                 .as_ref()
                 .is_some_and(|tier| !tier.is_one_time);
 
+            let github_id = ensure_github_user(state, activity).await?;
+
             crate::models::insert_sent_sponsorship(
                 state.database.write(),
                 crate::models::NewSentSponsorship {
                     id: &activity.id,
-                    github_id: activity.sponsor.as_ref().and_then(|s| s.database_id),
+                    github_id,
                     amount: activity
                         .sponsors_tier
                         .as_ref()
@@ -306,6 +328,7 @@ async fn run(
             .sponsors_tier
             .as_ref()
             .map(|tier| tier.monthly_price_in_cents);
+        let github_id = ensure_github_user(state, activity).await?;
 
         if let Some(sponsorship) =
             crate::models::find_sent_sponsorship(state.database.read(), &activity.id).await?
@@ -314,7 +337,7 @@ async fn run(
                 crate::models::backfill_sent_sponsorship(
                     state.database.write(),
                     &activity.id,
-                    activity.sponsor.as_ref().and_then(|s| s.database_id),
+                    github_id,
                     amount_in_cents,
                     recurring,
                 )
@@ -384,7 +407,7 @@ async fn run(
             state.database.write(),
             crate::models::NewSentSponsorship {
                 id: &activity.id,
-                github_id: activity.sponsor.as_ref().and_then(|s| s.database_id),
+                github_id,
                 amount: amount_in_cents,
                 message_id: Some(message.id.get() as i64),
                 recurring,
@@ -458,11 +481,62 @@ async fn run(
     Ok(())
 }
 
+async fn sync_tier_roles(
+    state: &crate::routes::State,
+    evaluation: &Evaluation,
+) -> Result<(), anyhow::Error> {
+    if crate::tiers::managed_role_ids(&state.env).is_empty() {
+        return Ok(());
+    }
+
+    let linked = crate::models::linked_github_users(state.database.read()).await?;
+    if linked.is_empty() {
+        return Ok(());
+    }
+
+    let guild_id = crate::utils::guild_id(state).await?;
+
+    for user in linked {
+        let Some(discord_user_id) = user.discord_user_id else {
+            continue;
+        };
+
+        crate::tiers::apply_roles(
+            state,
+            guild_id,
+            UserId::new(discord_user_id as u64),
+            &crate::tiers::earned_role_ids(&state.env, evaluation, user.id),
+        )
+        .await?;
+    }
+
+    Ok(())
+}
+
+async fn run(state: &crate::routes::State, backfilled: &mut bool) -> Result<(), anyhow::Error> {
+    let ledger = refresh_ledger(&state.env).await?;
+    let evaluation = evaluate(&ledger, chrono::Utc::now());
+
+    let announced = match state.env.github_sponsors_channel_id {
+        Some(channel_id) => announce(state, channel_id, backfilled, &ledger, &evaluation).await,
+        None => Ok(()),
+    };
+    let synced = sync_tier_roles(state, &evaluation).await;
+
+    announced?;
+    synced?;
+
+    Ok(())
+}
+
 pub fn spawn_sponsor_updates_task(state: crate::routes::State) {
     tokio::spawn(async move {
-        let Some(channel_id) = state.env.github_sponsors_channel_id else {
+        let tiers_configured =
+            !state.env.donator_tiers.is_empty() || !state.env.sponsor_tiers.is_empty();
+
+        if state.env.github_sponsors_channel_id.is_none() && !tiers_configured {
             return;
-        };
+        }
 
         if state.env.github_token.is_none() {
             tracing::warn!("GITHUB_TOKEN is not set, sponsorship updates are disabled");
@@ -472,7 +546,7 @@ pub fn spawn_sponsor_updates_task(state: crate::routes::State) {
         let mut backfilled = false;
 
         loop {
-            if let Err(err) = run(&state, channel_id, &mut backfilled).await {
+            if let Err(err) = run(&state, &mut backfilled).await {
                 tracing::error!("failed to collect sponsors: {:?}", err);
                 sentry_anyhow::capture_anyhow(&err);
             }

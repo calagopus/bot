@@ -16,6 +16,11 @@ pub struct Env {
     pub github_sponsors_login: Option<String>,
     pub github_verify_token: String,
     pub github_token: Option<String>,
+    pub github_oauth_client_id: Option<String>,
+    pub github_oauth_client_secret: Option<String>,
+
+    pub donator_tiers: Vec<crate::tiers::Tier>,
+    pub sponsor_tiers: Vec<crate::tiers::Tier>,
 
     pub guild_id: Option<u64>,
     pub bot_token: String,
@@ -79,6 +84,27 @@ impl Env {
             github_token: std::env::var("GITHUB_TOKEN")
                 .ok()
                 .map(|s| s.trim_matches('"').to_string()),
+            github_oauth_client_id: std::env::var("GITHUB_OAUTH_CLIENT_ID")
+                .ok()
+                .map(|s| s.trim_matches('"').to_string())
+                .filter(|s| !s.is_empty()),
+            github_oauth_client_secret: std::env::var("GITHUB_OAUTH_CLIENT_SECRET")
+                .ok()
+                .map(|s| s.trim_matches('"').to_string())
+                .filter(|s| !s.is_empty()),
+
+            donator_tiers: crate::tiers::parse(
+                crate::tiers::TierKind::Donator,
+                std::env::var("DONATOR_TIERS")
+                    .unwrap_or("".to_string())
+                    .trim_matches('"'),
+            ),
+            sponsor_tiers: crate::tiers::parse(
+                crate::tiers::TierKind::Sponsor,
+                std::env::var("SPONSOR_TIERS")
+                    .unwrap_or("".to_string())
+                    .trim_matches('"'),
+            ),
 
             guild_id: std::env::var("GUILD_ID")
                 .map(|g| g.trim_matches('"').to_string())

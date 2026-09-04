@@ -15,6 +15,8 @@ use serenity::all::{
 use std::sync::LazyLock;
 use utoipa_axum::{router::OpenApiRouter, routes};
 
+mod oauth;
+
 static GITHUB_TX: LazyLock<
     tokio::sync::mpsc::UnboundedSender<(State, octocrab::models::webhook_events::WebhookEvent, u8)>,
 > = LazyLock::new(|| {
@@ -801,5 +803,6 @@ mod post {
 pub fn router(state: &State) -> OpenApiRouter<State> {
     OpenApiRouter::new()
         .routes(routes!(post::route))
+        .nest("/oauth", oauth::router(state))
         .with_state(state.clone())
 }

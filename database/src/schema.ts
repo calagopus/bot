@@ -34,23 +34,29 @@ export const textMessages = sqliteTable('text_messages', {
 	uniqueIndex('text_messages_message_id_idx').on(textMessages.messageId).where(isNotNull(textMessages.messageId))
 ])
 
-export const githubUsers = sqliteTable('github_users', {
-	id: integer('id').primaryKey().notNull(),
+export const linkedAccounts = sqliteTable('linked_accounts', {
+	id: integer('id').primaryKey({ autoIncrement: true }).notNull(),
+
+	provider: text('provider').notNull(),
+	providerId: text('provider_id').notNull(),
 
 	login: text('login'),
 
 	discordUserId: integer('discord_user_id'),
 
 	created: integer('created', { mode: 'timestamp' }).default(sql`(strftime('%s','now'))`).notNull(),
-}, (githubUsers) => [
-	uniqueIndex('github_users_discord_user_id_idx').on(githubUsers.discordUserId).where(isNotNull(githubUsers.discordUserId))
+}, (linkedAccounts) => [
+	uniqueIndex('linked_accounts_provider_id_idx').on(linkedAccounts.provider, linkedAccounts.providerId),
+	index('linked_accounts_discord_user_id_idx').on(linkedAccounts.discordUserId)
 ])
 
 export const sentSponsorships = sqliteTable('sent_sponsorships', {
 	id: text('id').primaryKey().notNull(),
 
-	githubId: integer('github_id').references(() => githubUsers.id, { onDelete: 'set null' }),
+	provider: text('provider').default('github').notNull(),
+	accountId: integer('account_id').references(() => linkedAccounts.id, { onDelete: 'set null' }),
 	amount: integer('amount'),
+	currency: text('currency'),
 
 	messageId: integer('message_id'),
 	recurring: integer('recurring', { mode: 'boolean' }).default(false).notNull(),
@@ -60,5 +66,12 @@ export const sentSponsorships = sqliteTable('sent_sponsorships', {
 	created: integer('created', { mode: 'timestamp' }).default(sql`(strftime('%s','now'))`).notNull(),
 }, (sentSponsorships) => [
 	index('sent_sponsorships_created_idx').on(sentSponsorships.created),
+	index('sent_sponsorships_provider_idx').on(sentSponsorships.provider),
 	uniqueIndex('sent_sponsorships_message_id_idx').on(sentSponsorships.messageId).where(isNotNull(sentSponsorships.messageId))
 ])
+
+export const sponsorProviders = sqliteTable('sponsor_providers', {
+	provider: text('provider').primaryKey().notNull(),
+
+	seeded: integer('seeded', { mode: 'timestamp' }).default(sql`(strftime('%s','now'))`).notNull(),
+})

@@ -1,42 +1,64 @@
-use super::{
-    EvaluatedSpell, Evaluation, GithubSponsorshipNode, Ledger, SponsorsActivityAction, evaluate,
-    refresh_ledger, sponsors_login,
-};
+use super::{Contribution, Evaluation, Ledger, Provider, amount, evaluate, refresh_ledger};
 use serenity::all::{
     Component, ContainerComponent, CreateComponent, CreateContainer, CreateContainerComponent,
     CreateMessage, CreateSection, CreateSectionAccessory, CreateSectionComponent,
     CreateTextDisplay, CreateThumbnail, CreateUnfurledMediaItem, EditMessage, GenericChannelId,
     MessageFlags, MessagePagination, Section, SectionComponent, UserId, nonmax::NonMaxU8,
 };
+use std::collections::HashMap;
 
 const HEADING_ONE_TIME: &str = "## <:cash:1150889514236137605> Sponsorship received";
-const HEADING_MONTHLY: &str = "## <:cash:1150889514236137605> Monthly sponsorship";
-const HEADING_MONTHLY_ENDED: &str = "## <:cash:1150889514236137605> Monthly sponsorship ended";
+const HEADING_RECURRING: &str = "## <:cash:1150889514236137605> Recurring sponsorship";
+const HEADING_RECURRING_ENDED: &str = "## <:cash:1150889514236137605> Recurring sponsorship ended";
 
-pub fn dollars(cents: i64) -> String {
-    format!("${:.2}", cents as f64 / 100.0)
-}
-
-fn sponsor_link(spell: &EvaluatedSpell) -> String {
-    match &spell.sponsor {
-        Some(sponsor) => format!(
-            "[**{login}**](https://github.com/{login})",
-            login = sponsor.login
-        ),
+fn sponsor_link(contribution: &Contribution) -> String {
+    match &contribution.account {
+        Some(account) => format!("[**{}**]({})", account.login, account.url),
         None => "**Someone** (Anonymous)".to_string(),
     }
 }
 
-fn avatar_url(env: &crate::env::Env, spell: &EvaluatedSpell) -> String {
-    match &spell.sponsor {
-        Some(sponsor) => sponsor.avatar_url.clone(),
-        None => format!("https://github.com/{}.png", sponsors_login(env)),
+fn avatar_url(env: &crate::env::Env, contribution: &Contribution) -> String {
+    match &contribution.account {
+        Some(account) => account.avatar_url.clone(),
+        None => contribution.provider.fallback_avatar_url(env),
     }
+}
+
+fn footer<'a>(env: &crate::env::Env, contribution: &Contribution) -> CreateContainerComponent<'a> {
+    CreateContainerComponent::TextDisplay(CreateTextDisplay::new(format!(
+        "-# {}",
+        contribution.provider.contribute_url(env)
+    )))
+}
+
+/// A contribution's figures in the currency the announcement messages show.
+struct Rendered<'a> {
+    currency: &'a str,
+    amount_in_cents: i64,
+    paid_in_cents: i64,
+}
+
+async fn render<'a>(
+    env: &'a crate::env::Env,
+    contribution: &Contribution,
+) -> Result<Rendered<'a>, anyhow::Error> {
+    let currency = env.sponsors_message_currency.as_str();
+    let native = contribution.native_currency.as_str();
+
+    Ok(Rendered {
+        currency,
+        amount_in_cents: super::convert(env, contribution.native_amount_in_cents, native, currency)
+            .await?,
+        paid_in_cents: super::convert(env, contribution.native_paid_in_cents, native, currency)
+            .await?,
+    })
 }
 
 fn one_time_components<'a>(
     env: &crate::env::Env,
-    spell_like: &EvaluatedSpell,
+    rendered: &Rendered<'_>,
+    contribution: &Contribution,
 ) -> Vec<CreateContainerComponent<'a>> {
     vec![
         CreateContainerComponent::Section(CreateSection::new(
@@ -44,45 +66,56 @@ fn one_time_components<'a>(
                 CreateSectionComponent::TextDisplay(CreateTextDisplay::new(HEADING_ONE_TIME)),
                 CreateSectionComponent::TextDisplay(CreateTextDisplay::new(format!(
                     "{} sponsored us for `{}`!",
-                    sponsor_link(spell_like),
-                    dollars(spell_like.monthly_in_cents)
+                    sponsor_link(contribution),
+                    amount(rendered.amount_in_cents, rendered.currency)
                 ))),
             ],
             CreateSectionAccessory::Thumbnail(CreateThumbnail::new(CreateUnfurledMediaItem::new(
-                avatar_url(env, spell_like),
+                avatar_url(env, contribution),
             ))),
         )),
-        CreateContainerComponent::TextDisplay(CreateTextDisplay::new(format!(
-            "-# https://github.com/sponsors/{}",
-            sponsors_login(env)
-        ))),
+        footer(env, contribution),
     ]
 }
 
-fn monthly_components<'a>(
+fn recurring_components<'a>(
     env: &crate::env::Env,
-    spell: &EvaluatedSpell,
+    rendered: &Rendered<'_>,
+    contribution: &Contribution,
 ) -> Vec<CreateContainerComponent<'a>> {
     let months = format!(
         "{} month{}",
-        spell.months_paid,
-        if spell.months_paid == 1 { "" } else { "s" }
+        contribution.months_paid,
+        if contribution.months_paid == 1 {
+            ""
+        } else {
+            "s"
+        }
     );
 
-    let body = if spell.active() {
+    let rate = match contribution.interval {
+        Some(interval) => format!(
+            "{}/{}",
+            amount(rendered.amount_in_cents, rendered.currency),
+            interval.label()
+        ),
+        _ => amount(rendered.amount_in_cents, rendered.currency),
+    };
+
+    let body = if contribution.active() {
         format!(
-            "{} sponsors us monthly for `{}` - `{}` contributed over {}!",
-            sponsor_link(spell),
-            dollars(spell.monthly_in_cents),
-            dollars(spell.paid_in_cents),
+            "{} sponsors us for `{}` - `{}` contributed over {}!",
+            sponsor_link(contribution),
+            rate,
+            amount(rendered.paid_in_cents, rendered.currency),
             months
         )
     } else {
         format!(
-            "{} sponsored us monthly for `{}` - `{}` contributed over {}.",
-            sponsor_link(spell),
-            dollars(spell.monthly_in_cents),
-            dollars(spell.paid_in_cents),
+            "{} sponsored us for `{}` - `{}` contributed over {}.",
+            sponsor_link(contribution),
+            rate,
+            amount(rendered.paid_in_cents, rendered.currency),
             months
         )
     };
@@ -90,21 +123,20 @@ fn monthly_components<'a>(
     vec![
         CreateContainerComponent::Section(CreateSection::new(
             vec![
-                CreateSectionComponent::TextDisplay(CreateTextDisplay::new(if spell.active() {
-                    HEADING_MONTHLY
-                } else {
-                    HEADING_MONTHLY_ENDED
-                })),
+                CreateSectionComponent::TextDisplay(CreateTextDisplay::new(
+                    if contribution.active() {
+                        HEADING_RECURRING
+                    } else {
+                        HEADING_RECURRING_ENDED
+                    },
+                )),
                 CreateSectionComponent::TextDisplay(CreateTextDisplay::new(body)),
             ],
             CreateSectionAccessory::Thumbnail(CreateThumbnail::new(CreateUnfurledMediaItem::new(
-                avatar_url(env, spell),
+                avatar_url(env, contribution),
             ))),
         )),
-        CreateContainerComponent::TextDisplay(CreateTextDisplay::new(format!(
-            "-# https://github.com/sponsors/{}",
-            sponsors_login(env)
-        ))),
+        footer(env, contribution),
     ]
 }
 
@@ -149,16 +181,17 @@ fn message_text(components: &[Component]) -> String {
 async fn backfill_message_ids(
     state: &crate::routes::State,
     channel_id: u64,
-    spells: &[EvaluatedSpell],
+    provider: Provider,
+    contributions: &[&Contribution],
 ) -> Result<(), anyhow::Error> {
-    let pending = crate::models::sponsorships_without_message(state.database.read())
+    let pending = crate::models::sponsorships_without_message(state.database.read(), provider)
         .await?
         .into_iter()
         .filter_map(|sponsorship| {
-            spells
+            contributions
                 .iter()
-                .find(|spell| spell.activity_id == sponsorship.id)
-                .map(|spell| (sponsorship.id, spell))
+                .find(|contribution| contribution.id == sponsorship.id)
+                .map(|contribution| (sponsorship.id, *contribution))
         })
         .collect::<Vec<_>>();
 
@@ -169,6 +202,8 @@ async fn backfill_message_ids(
     let http = state.bot.read().await.clone();
     let channel_id = GenericChannelId::new(channel_id);
     let current_user = http.get_current_user().await?.id;
+    let contribute_url = provider.contribute_url(&state.env);
+    let linked = crate::models::linked_message_ids(state.database.read()).await?;
 
     let mut candidates = Vec::new();
     let mut before = None;
@@ -189,12 +224,20 @@ async fn backfill_message_ids(
         before = messages.last().map(|message| message.id);
 
         for message in messages {
-            if message.author.id != current_user {
+            if message.author.id != current_user || linked.contains(&(message.id.get() as i64)) {
                 continue;
             }
 
             let text = message_text(&message.components);
-            if text.contains("Sponsorship received") || text.contains("Monthly sponsorship") {
+
+            if !text.contains(&contribute_url) {
+                continue;
+            }
+
+            if text.contains("Sponsorship received")
+                || text.contains("Monthly sponsorship")
+                || text.contains("Recurring sponsorship")
+            {
                 candidates.push((message.id, text));
             }
         }
@@ -209,11 +252,11 @@ async fn backfill_message_ids(
     let mut used = vec![false; candidates.len()];
     let mut linked = 0;
 
-    for (activity_id, spell) in pending {
-        let marker = spell
-            .sponsor
+    for (contribution_id, contribution) in pending {
+        let marker = contribution
+            .account
             .as_ref()
-            .map(|sponsor| format!("https://github.com/{}", sponsor.login));
+            .map(|account| account.url.clone());
 
         let found = candidates
             .iter()
@@ -231,8 +274,8 @@ async fn backfill_message_ids(
 
         let Some(index) = found else {
             tracing::debug!(
-                "no existing message found for recurring sponsorship {}",
-                activity_id
+                "no existing message found for sponsorship {}",
+                contribution_id
             );
             continue;
         };
@@ -240,7 +283,7 @@ async fn backfill_message_ids(
         used[index] = true;
         crate::models::set_sent_sponsorship_message(
             state.database.write(),
-            &activity_id,
+            &contribution_id,
             candidates[index].0.get() as i64,
         )
         .await?;
@@ -248,98 +291,94 @@ async fn backfill_message_ids(
     }
 
     if linked > 0 {
-        tracing::info!("linked {linked} existing sponsorship message(s) for updating");
+        tracing::info!(
+            "linked {linked} existing {} sponsorship message(s) for updating",
+            provider.key()
+        );
     }
 
     Ok(())
 }
 
-async fn ensure_github_user(
+async fn ensure_account(
     state: &crate::routes::State,
-    activity: &GithubSponsorshipNode,
+    contribution: &Contribution,
 ) -> Result<Option<i64>, anyhow::Error> {
-    let Some(sponsor) = activity.sponsor.as_ref() else {
+    let Some(account) = contribution.account.as_ref() else {
         return Ok(None);
     };
 
-    let Some(github_id) = sponsor.database_id else {
-        return Ok(None);
-    };
+    let id = crate::models::upsert_linked_account(
+        state.database.write(),
+        account.provider,
+        &account.id,
+        Some(&account.login),
+    )
+    .await?;
 
-    crate::models::upsert_github_user(state.database.write(), github_id, Some(&sponsor.login))
-        .await?;
-
-    Ok(Some(github_id))
+    Ok(Some(id))
 }
 
 async fn announce(
     state: &crate::routes::State,
     channel_id: u64,
-    backfilled: &mut bool,
-    ledger: &Ledger,
+    backfilled: &mut Vec<Provider>,
+    provider: Provider,
     evaluation: &Evaluation,
 ) -> Result<(), anyhow::Error> {
-    let announceable = ledger
-        .activities
+    let announceable = evaluation
+        .contributions
         .iter()
-        .filter(|activity| activity.action == Some(SponsorsActivityAction::NewSponsorship))
+        .filter(|contribution| contribution.provider == provider)
         .collect::<Vec<_>>();
 
-    if crate::models::count_sent_sponsorships(state.database.read()).await? == 0 {
+    // Seed historical contributions without announcing them, including an empty first poll.
+    if !crate::models::is_provider_seeded(state.database.read(), provider).await? {
         tracing::info!(
-            "seeding {} existing sponsorship(s) without announcing them",
-            announceable.len()
+            "seeding {} existing {} sponsorship(s) without announcing them",
+            announceable.len(),
+            provider.key()
         );
 
-        for activity in &announceable {
-            let recurring = activity
-                .sponsors_tier
-                .as_ref()
-                .is_some_and(|tier| !tier.is_one_time);
-
-            let github_id = ensure_github_user(state, activity).await?;
+        for contribution in &announceable {
+            let account_id = ensure_account(state, contribution).await?;
 
             crate::models::insert_sent_sponsorship(
                 state.database.write(),
                 crate::models::NewSentSponsorship {
-                    id: &activity.id,
-                    github_id,
-                    amount: activity
-                        .sponsors_tier
-                        .as_ref()
-                        .map(|tier| tier.monthly_price_in_cents),
-                    recurring,
-                    created: activity.timestamp,
-                    ..Default::default()
+                    id: &contribution.id,
+                    provider,
+                    account_id,
+                    amount: Some(contribution.native_amount_in_cents),
+                    currency: &contribution.native_currency,
+                    message_id: None,
+                    recurring: contribution.recurring,
+                    paid: None,
+                    created: Some(contribution.start),
                 },
             )
             .await?;
         }
+
+        crate::models::mark_provider_seeded(state.database.write(), provider).await?;
     }
 
     let channel = GenericChannelId::new(channel_id);
 
-    for activity in announceable {
-        let recurring = activity
-            .sponsors_tier
-            .as_ref()
-            .is_some_and(|tier| !tier.is_one_time);
-        let amount_in_cents = activity
-            .sponsors_tier
-            .as_ref()
-            .map(|tier| tier.monthly_price_in_cents);
-        let github_id = ensure_github_user(state, activity).await?;
+    for contribution in &announceable {
+        let account_id = ensure_account(state, contribution).await?;
 
         if let Some(sponsorship) =
-            crate::models::find_sent_sponsorship(state.database.read(), &activity.id).await?
+            crate::models::find_sent_sponsorship(state.database.read(), &contribution.id).await?
         {
-            if sponsorship.github_id.is_none() && sponsorship.amount.is_none() {
+            if sponsorship.account_id.is_none() && sponsorship.amount.is_none() {
                 crate::models::backfill_sent_sponsorship(
                     state.database.write(),
-                    &activity.id,
-                    github_id,
-                    amount_in_cents,
-                    recurring,
+                    &contribution.id,
+                    account_id,
+                    Some(contribution.native_amount_in_cents),
+                    &contribution.native_currency,
+                    contribution.recurring,
                 )
                 .await?;
             }
@@ -352,46 +391,28 @@ async fn announce(
             continue;
         }
 
-        let synthesised;
-        let spell = match evaluation
-            .spells
-            .iter()
-            .find(|spell| spell.activity_id == activity.id)
-        {
-            Some(spell) => spell,
-            None => {
-                synthesised = EvaluatedSpell {
-                    activity_id: activity.id.clone(),
-                    sponsor: activity
-                        .is_public()
-                        .then(|| activity.sponsor.clone())
-                        .flatten(),
-                    start: activity.timestamp.unwrap_or_else(chrono::Utc::now),
-                    end: None,
-                    monthly_in_cents: amount_in_cents.unwrap_or(0),
-                    paid_in_cents: amount_in_cents.unwrap_or(0),
-                    months_paid: 1,
-                };
-
-                &synthesised
-            }
-        };
+        let rendered = render(&state.env, contribution).await?;
 
         tracing::info!(
-            "new {} sponsorship: {} for {}",
-            if recurring { "monthly" } else { "one-time" },
-            spell
-                .sponsor
+            "new {} {} sponsorship: {} for {}",
+            provider.key(),
+            if contribution.recurring {
+                "recurring"
+            } else {
+                "one-time"
+            },
+            contribution
+                .account
                 .as_ref()
-                .map_or("anonymous", |sponsor| sponsor.login.as_str()),
-            dollars(spell.monthly_in_cents)
+                .map_or("anonymous", |account| account.login.as_str()),
+            amount(rendered.amount_in_cents, rendered.currency)
         );
 
         let components = [CreateComponent::Container(CreateContainer::new(
-            if recurring {
-                monthly_components(&state.env, spell)
+            if contribution.recurring {
+                recurring_components(&state.env, &rendered, contribution)
             } else {
-                one_time_components(&state.env, spell)
+                one_time_components(&state.env, &rendered, contribution)
             },
         ))];
         let message = channel
@@ -406,29 +427,38 @@ async fn announce(
         crate::models::insert_sent_sponsorship(
             state.database.write(),
             crate::models::NewSentSponsorship {
-                id: &activity.id,
-                github_id,
-                amount: amount_in_cents,
+                id: &contribution.id,
+                provider,
+                account_id,
+                amount: Some(contribution.native_amount_in_cents),
+                currency: &contribution.native_currency,
                 message_id: Some(message.id.get() as i64),
-                recurring,
-                paid: Some(spell.paid_in_cents),
-                created: activity.timestamp,
+                recurring: contribution.recurring,
+                paid: Some(contribution.native_paid_in_cents),
+                created: Some(contribution.start),
             },
         )
         .await?;
     }
 
-    if !*backfilled {
-        if let Err(err) = backfill_message_ids(state, channel_id, &evaluation.spells).await {
-            tracing::error!("failed to link existing sponsorship messages: {:?}", err);
+    if !backfilled.contains(&provider) {
+        if let Err(err) = backfill_message_ids(state, channel_id, provider, &announceable).await {
+            tracing::error!(
+                "failed to link existing {} sponsorship messages: {:?}",
+                provider.key(),
+                err
+            );
         }
 
-        *backfilled = true;
+        backfilled.push(provider);
     }
 
-    for spell in &evaluation.spells {
+    for contribution in announceable
+        .iter()
+        .filter(|contribution| contribution.recurring)
+    {
         let Some(sponsorship) =
-            crate::models::find_sent_sponsorship(state.database.read(), &spell.activity_id).await?
+            crate::models::find_sent_sponsorship(state.database.read(), &contribution.id).await?
         else {
             continue;
         };
@@ -437,12 +467,16 @@ async fn announce(
             continue;
         };
 
-        if sponsorship.paid == Some(spell.paid_in_cents)
-            && sponsorship.ended == !spell.active()
+        if sponsorship.currency.as_deref() == Some(contribution.native_currency.as_str())
+            && sponsorship.amount == Some(contribution.native_amount_in_cents)
+            && sponsorship.paid == Some(contribution.native_paid_in_cents)
+            && sponsorship.ended == !contribution.active()
             && sponsorship.recurring
         {
             continue;
         }
+
+        let rendered = render(&state.env, contribution).await?;
 
         let mut message = state
             .bot
@@ -452,7 +486,7 @@ async fn announce(
             .await?;
 
         let components = [CreateComponent::Container(CreateContainer::new(
-            monthly_components(&state.env, spell),
+            recurring_components(&state.env, &rendered, contribution),
         ))];
         message
             .edit(
@@ -465,16 +499,18 @@ async fn announce(
 
         crate::models::set_sent_sponsorship_rendered(
             state.database.write(),
-            &spell.activity_id,
-            spell.paid_in_cents,
-            !spell.active(),
+            &contribution.id,
+            contribution.native_amount_in_cents,
+            contribution.native_paid_in_cents,
+            &contribution.native_currency,
+            !contribution.active(),
         )
         .await?;
 
         tracing::debug!(
-            "updated monthly sponsorship message for {} to {}",
-            spell.activity_id,
-            dollars(spell.paid_in_cents)
+            "updated recurring sponsorship message for {} to {}",
+            contribution.id,
+            amount(rendered.paid_in_cents, rendered.currency)
         );
     }
 
@@ -483,29 +519,43 @@ async fn announce(
 
 async fn sync_tier_roles(
     state: &crate::routes::State,
+    ledger: &Ledger,
     evaluation: &Evaluation,
 ) -> Result<(), anyhow::Error> {
     if !crate::tiers::is_configured(&state.env) {
         return Ok(());
     }
 
-    let linked = crate::models::linked_github_users(state.database.read()).await?;
+    let linked = crate::models::linked_accounts(state.database.read()).await?;
     if linked.is_empty() {
         return Ok(());
     }
 
-    let guild_id = crate::utils::guild_id(state).await?;
-
-    for user in linked {
-        let Some(discord_user_id) = user.discord_user_id else {
+    let mut members: HashMap<i64, Vec<(Provider, String)>> = HashMap::new();
+    for account in linked {
+        let (Some(discord_user_id), Some(provider)) = (account.discord_user_id, account.provider())
+        else {
             continue;
         };
+
+        members
+            .entry(discord_user_id)
+            .or_default()
+            .push((provider, account.provider_id));
+    }
+
+    let guild_id = crate::utils::guild_id(state).await?;
+
+    for (discord_user_id, accounts) in members {
+        if !ledger.is_complete_for(&accounts) {
+            continue;
+        }
 
         crate::tiers::apply_roles(
             state,
             guild_id,
             UserId::new(discord_user_id as u64),
-            &crate::tiers::earned_role_ids(&state.env, evaluation, user.id),
+            &crate::tiers::earned_role_ids(&state.env, evaluation, &accounts),
         )
         .await?;
     }
@@ -513,15 +563,32 @@ async fn sync_tier_roles(
     Ok(())
 }
 
-async fn run(state: &crate::routes::State, backfilled: &mut bool) -> Result<(), anyhow::Error> {
+async fn run(
+    state: &crate::routes::State,
+    backfilled: &mut Vec<Provider>,
+) -> Result<(), anyhow::Error> {
     let ledger = refresh_ledger(&state.env).await?;
-    let evaluation = evaluate(&ledger, chrono::Utc::now());
+    let evaluation = evaluate(&ledger);
 
-    let announced = match state.env.github_sponsors_channel_id {
-        Some(channel_id) => announce(state, channel_id, backfilled, &ledger, &evaluation).await,
-        None => Ok(()),
-    };
-    let synced = sync_tier_roles(state, &evaluation).await;
+    let mut announced = Ok(());
+    if let Some(channel_id) = state.env.sponsors_channel_id {
+        for provider_ledger in &ledger.providers {
+            let result = announce(
+                state,
+                channel_id,
+                backfilled,
+                provider_ledger.provider,
+                &evaluation,
+            )
+            .await;
+
+            if announced.is_ok() {
+                announced = result;
+            }
+        }
+    }
+
+    let synced = sync_tier_roles(state, &ledger, &evaluation).await;
 
     announced?;
     synced?;
@@ -533,16 +600,26 @@ pub fn spawn_sponsor_updates_task(state: crate::routes::State) {
     tokio::spawn(async move {
         let tiers_configured = crate::tiers::is_configured(&state.env);
 
-        if state.env.github_sponsors_channel_id.is_none() && !tiers_configured {
+        if state.env.sponsors_channel_id.is_none() && !tiers_configured {
             return;
         }
 
-        if state.env.github_token.is_none() {
-            tracing::warn!("GITHUB_TOKEN is not set, sponsorship updates are disabled");
+        if !super::is_configured(&state.env) {
+            tracing::warn!(
+                "neither GITHUB_TOKEN nor OPENCOLLECTIVE_SLUG is set, sponsorship updates are disabled"
+            );
             return;
         }
 
-        let mut backfilled = false;
+        if super::opencollective::is_configured(&state.env)
+            && state.env.opencollective_token.is_none()
+        {
+            tracing::warn!(
+                "OPENCOLLECTIVE_TOKEN is not set, open collective requests will be rate limited"
+            );
+        }
+
+        let mut backfilled = Vec::new();
 
         loop {
             if let Err(err) = run(&state, &mut backfilled).await {

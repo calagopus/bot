@@ -5,7 +5,7 @@ mod get {
     use crate::{
         response::{ApiResponse, ApiResponseResult},
         routes::{ApiError, GetState},
-        sponsors::{cached_ledger, evaluate},
+        sponsors::{Provider, cached_ledger, evaluate},
     };
     use axum::http::StatusCode;
     use serde::Serialize;
@@ -15,7 +15,7 @@ mod get {
     nestify::nest! {
         #[derive(ToSchema, Serialize)]
         struct Response {
-            currency: &'static str,
+            currency: String,
             monthly_cents: i64,
 
             #[schema(inline)]
@@ -26,6 +26,8 @@ mod get {
             },
 
             sponsors: Vec<#[derive(ToSchema, Serialize)] struct ResponseSponsor {
+                provider: Provider,
+
                 #[schema(inline)]
                 status: #[derive(ToSchema, Serialize)] #[serde(rename_all = "snake_case")] enum ResponseSponsorStatus {
                     Monthly,
@@ -35,6 +37,9 @@ mod get {
 
                 #[schema(inline)]
                 profile: Option<#[derive(ToSchema, Serialize)] struct ResponseSponsorProfile {
+                    account_id: String,
+                    /// Only set for GitHub sponsors, kept for consumers written before
+                    /// Open Collective support was added.
                     github_id: Option<i64>,
                     #[schema(inline)]
                     discord_user_id: Option<String>,
@@ -65,7 +70,7 @@ mod get {
         (status = SERVICE_UNAVAILABLE, body = ApiError),
     ))]
     pub async fn route(state: GetState) -> ApiResponseResult {
-        if state.env.github_token.is_none() {
+        if !crate::sponsors::is_configured(&state.env) {
             return ApiResponse::error("sponsor data is not configured")
                 .with_status(StatusCode::SERVICE_UNAVAILABLE)
                 .ok();
@@ -82,13 +87,19 @@ mod get {
             }
         };
 
-        let evaluation = evaluate(&ledger, chrono::Utc::now());
+        let evaluation = evaluate(&ledger);
 
-        let linked: HashMap<i64, i64> = crate::models::linked_github_users(state.database.read())
-            .await?
-            .into_iter()
-            .filter_map(|user| Some((user.id, user.discord_user_id?)))
-            .collect();
+        let linked: HashMap<(String, String), i64> =
+            crate::models::linked_accounts(state.database.read())
+                .await?
+                .into_iter()
+                .filter_map(|account| {
+                    Some((
+                        (account.provider, account.provider_id),
+                        account.discord_user_id?,
+                    ))
+                })
+                .collect();
 
         let mut sponsors: Vec<ResponseSponsor> = evaluation
             .sponsors
@@ -102,20 +113,24 @@ mod get {
                     ResponseSponsorStatus::OneTime
                 };
 
-                let public = sponsor.sponsor.is_some();
+                let public = sponsor.account.is_some();
+                let discord_user_id = linked
+                    .get(&(sponsor.provider.key().to_string(), sponsor.key.clone()))
+                    .map(|discord_user_id| (*discord_user_id as u64).to_string());
 
                 ResponseSponsor {
+                    provider: sponsor.provider,
                     status,
-                    profile: sponsor.sponsor.map(|sponsor| ResponseSponsorProfile {
-                        github_id: sponsor.database_id,
-                        discord_user_id: sponsor
-                            .database_id
-                            .and_then(|github_id| linked.get(&github_id))
-                            .map(|discord_user_id| (*discord_user_id as u64).to_string()),
-                        login: sponsor.login,
-                        name: sponsor.name,
-                        url: sponsor.url,
-                        avatar_url: sponsor.avatar_url,
+                    profile: sponsor.account.map(|account| ResponseSponsorProfile {
+                        github_id: (account.provider == Provider::GitHub)
+                            .then(|| account.id.parse().ok())
+                            .flatten(),
+                        account_id: account.id,
+                        discord_user_id,
+                        login: account.login,
+                        name: account.name,
+                        url: account.url,
+                        avatar_url: account.avatar_url,
                     }),
 
                     monthly_cents: sponsor.monthly_in_cents,
@@ -139,7 +154,6 @@ mod get {
         });
 
         ApiResponse::json(Response {
-            currency: "USD",
             monthly_cents: evaluation.monthly_recurring_in_cents,
 
             totals: ResponseTotals {
@@ -148,6 +162,7 @@ mod get {
                 lifetime_cents: evaluation.lifetime_in_cents,
             },
 
+            currency: evaluation.currency,
             sponsors,
         })
         .ok()

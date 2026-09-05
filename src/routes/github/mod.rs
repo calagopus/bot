@@ -519,7 +519,9 @@ async fn handle_repository_event(
 
         container_components.push(CreateContainerComponent::Section(CreateSection::new(
             vec![
-                CreateSectionComponent::TextDisplay(CreateTextDisplay::new("### Workflow Status")),
+                CreateSectionComponent::TextDisplay(CreateTextDisplay::new(
+                    "### <:hammer:1150889684227076227> Workflow Status",
+                )),
                 CreateSectionComponent::TextDisplay(CreateTextDisplay::new(workflow_status_string)),
             ],
             CreateSectionAccessory::Button(
@@ -679,7 +681,7 @@ async fn handle_organization_event(
             )),
         ));
 
-        if let Some(sponsors_channel_id) = state.env.github_sponsors_channel_id {
+        if let Some(sponsors_channel_id) = state.env.sponsors_channel_id {
             channel_id = sponsors_channel_id;
         }
     }

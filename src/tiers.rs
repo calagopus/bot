@@ -89,23 +89,17 @@ pub fn is_configured(env: &crate::env::Env) -> bool {
 pub fn earned_role_ids(
     env: &crate::env::Env,
     evaluation: &crate::sponsors::Evaluation,
-    github_id: i64,
+    accounts: &[(crate::sponsors::Provider, String)],
 ) -> Vec<RoleId> {
-    let Some(sponsor) = evaluation
-        .sponsors
-        .iter()
-        .find(|sponsor| sponsor.github_id == Some(github_id))
-    else {
-        return Vec::new();
-    };
+    let (lifetime_in_cents, monthly_in_cents) = evaluation.totals(accounts);
 
     let mut earned: Vec<RoleId> = Vec::new();
 
     // A base role is earned by any amount above zero, the same threshold `resolve` uses,
     // so it does not depend on the matching tier list being configured.
     for (base_role_id, amount_in_cents) in [
-        (env.donator_base_role_id, sponsor.lifetime_in_cents),
-        (env.sponsor_base_role_id, sponsor.monthly_in_cents),
+        (env.donator_base_role_id, lifetime_in_cents),
+        (env.sponsor_base_role_id, monthly_in_cents),
     ] {
         if amount_in_cents <= 0 {
             continue;
@@ -121,8 +115,8 @@ pub fn earned_role_ids(
     }
 
     for tier in [
-        resolve(&env.donator_tiers, sponsor.lifetime_in_cents),
-        resolve(&env.sponsor_tiers, sponsor.monthly_in_cents),
+        resolve(&env.donator_tiers, lifetime_in_cents),
+        resolve(&env.sponsor_tiers, monthly_in_cents),
     ]
     .into_iter()
     .flatten()
@@ -140,7 +134,7 @@ pub fn earned_role_ids(
 /// Brings the member's tier roles in line with `wanted`, leaving every unmanaged role alone.
 ///
 /// Base roles are only ever granted: once a member has one it stays, even after the
-/// sponsorship lapses or their GitHub account is unlinked.
+/// sponsorship lapses or their accounts are unlinked.
 pub async fn apply_roles(
     state: &crate::routes::InnerState,
     guild_id: GuildId,
@@ -229,22 +223,34 @@ pub async fn apply_roles(
 
 pub async fn sync_linked_member(
     state: &crate::routes::InnerState,
-    github_id: i64,
     discord_user_id: u64,
 ) -> Result<(), anyhow::Error> {
     if !is_configured(&state.env) {
         return Ok(());
     }
 
-    let ledger = crate::sponsors::cached_ledger(&state.env).await?;
-    let evaluation = crate::sponsors::evaluate(&ledger, chrono::Utc::now());
-    let guild_id = crate::utils::guild_id(state).await?;
-
-    apply_roles(
-        state,
-        guild_id,
-        UserId::new(discord_user_id),
-        &earned_role_ids(&state.env, &evaluation, github_id),
+    let accounts = crate::models::find_linked_accounts_by_discord(
+        state.database.read(),
+        discord_user_id as i64,
     )
-    .await
+    .await?
+    .into_iter()
+    .filter_map(|account| Some((account.provider()?, account.provider_id)))
+    .collect::<Vec<_>>();
+
+    let guild_id = crate::utils::guild_id(state).await?;
+    let wanted = if accounts.is_empty() {
+        Vec::new()
+    } else {
+        let ledger = crate::sponsors::cached_ledger(&state.env).await?;
+        if !ledger.is_complete_for(&accounts) {
+            return Ok(());
+        }
+
+        let evaluation = crate::sponsors::evaluate(&ledger);
+
+        earned_role_ids(&state.env, &evaluation, &accounts)
+    };
+
+    apply_roles(state, guild_id, UserId::new(discord_user_id), &wanted).await
 }

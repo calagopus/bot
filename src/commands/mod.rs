@@ -1,6 +1,5 @@
 mod admin;
-mod github;
-mod sponsor;
+pub mod sponsor;
 mod status;
 
 pub struct CommandList {
@@ -30,7 +29,6 @@ impl CommandList {
 
 pub fn commands(list: CommandList) -> CommandList {
     list.add_command(status::status_command())
-        .add_command(github::github_command())
         .add_command(sponsor::sponsor_command())
         .add_command(admin::admin_command())
 }

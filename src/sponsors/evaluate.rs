@@ -1,86 +1,13 @@
-use super::{GitHubSponsor, Ledger, SponsorsActivityAction};
+use super::{Contribution, Ledger, Provider, SponsorAccount};
 use indexmap::IndexMap;
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-enum SponsorKey {
-    Id(i64),
-    Login(String),
-}
-
-impl SponsorKey {
-    fn of(sponsor: &GitHubSponsor) -> Self {
-        match sponsor.database_id {
-            Some(id) => Self::Id(id),
-            None => Self::Login(sponsor.login.clone()),
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-struct Spell {
-    activity_id: String,
-    start: chrono::DateTime<chrono::Utc>,
-    end: Option<chrono::DateTime<chrono::Utc>>,
-    segments: Vec<(chrono::DateTime<chrono::Utc>, i64)>,
-}
-
-impl Spell {
-    #[inline]
-    fn monthly_in_cents(&self) -> i64 {
-        self.segments.last().map(|(_, cents)| *cents).unwrap_or(0)
-    }
-
-    fn evaluate(&self, now: chrono::DateTime<chrono::Utc>) -> (i64, u32) {
-        let end = self.end.unwrap_or(now);
-
-        let mut total = 0;
-        let mut months = 0;
-
-        for elapsed in 0.. {
-            let Some(charged) = self.start.checked_add_months(chrono::Months::new(elapsed)) else {
-                break;
-            };
-
-            if charged > end {
-                break;
-            }
-
-            total += self
-                .segments
-                .iter()
-                .rev()
-                .find(|(from, _)| *from <= charged)
-                .map(|(_, cents)| *cents)
-                .unwrap_or(0);
-            months += 1;
-        }
-
-        (total, months)
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct EvaluatedSpell {
-    pub activity_id: String,
-    pub sponsor: Option<GitHubSponsor>,
-    pub start: chrono::DateTime<chrono::Utc>,
-    pub end: Option<chrono::DateTime<chrono::Utc>>,
-    pub monthly_in_cents: i64,
-    pub paid_in_cents: i64,
-    pub months_paid: u32,
-}
-
-impl EvaluatedSpell {
-    #[inline]
-    pub fn active(&self) -> bool {
-        self.end.is_none()
-    }
-}
 
 #[derive(Debug, Clone)]
 pub struct EvaluatedSponsor {
-    pub github_id: Option<i64>,
-    pub sponsor: Option<GitHubSponsor>,
+    pub provider: Provider,
+    /// Matches `linked_accounts.provider_id` whenever the contributor has a real account.
+    pub key: String,
+    /// `None` when every one of their contributions is private or incognito.
+    pub account: Option<SponsorAccount>,
 
     pub active: bool,
     pub recurring_spells: usize,
@@ -97,6 +24,8 @@ pub struct EvaluatedSponsor {
 
 #[derive(Debug, Clone)]
 pub struct Evaluation {
+    pub currency: String,
+
     pub monthly_recurring_in_cents: i64,
 
     pub one_time_in_cents: i64,
@@ -108,140 +37,136 @@ pub struct Evaluation {
     pub one_time_sponsor_count: usize,
 
     pub sponsors: Vec<EvaluatedSponsor>,
-    pub spells: Vec<EvaluatedSpell>,
+    pub contributions: Vec<Contribution>,
+}
+
+impl Evaluation {
+    #[inline]
+    pub fn sponsor(&self, provider: Provider, key: &str) -> Option<&EvaluatedSponsor> {
+        self.sponsors
+            .iter()
+            .find(|sponsor| sponsor.provider == provider && sponsor.key == key)
+    }
+
+    pub fn totals(&self, accounts: &[(Provider, String)]) -> (i64, i64) {
+        accounts
+            .iter()
+            .filter_map(|(provider, key)| self.sponsor(*provider, key))
+            .fold((0, 0), |(lifetime, monthly), sponsor| {
+                (
+                    lifetime + sponsor.lifetime_in_cents,
+                    monthly + sponsor.monthly_in_cents,
+                )
+            })
+    }
 }
 
 #[derive(Default)]
 struct SponsorState {
-    sponsor: Option<GitHubSponsor>,
-    public: bool,
-    one_time_in_cents: i64,
-    one_time_refunded_in_cents: i64,
-    recurring_refunded_in_cents: i64,
-    spells: Vec<Spell>,
-    first_sponsored_at: Option<chrono::DateTime<chrono::Utc>>,
-    last_activity_at: Option<chrono::DateTime<chrono::Utc>>,
+    account: Option<SponsorAccount>,
+    contributions: Vec<Contribution>,
 }
 
-pub fn evaluate(ledger: &Ledger, now: chrono::DateTime<chrono::Utc>) -> Evaluation {
-    let mut states: IndexMap<SponsorKey, SponsorState> = IndexMap::new();
-
-    for activity in &ledger.activities {
-        let (Some(action), Some(sponsor), Some(timestamp)) = (
-            activity.action,
-            activity.sponsor.as_ref(),
-            activity.timestamp,
-        ) else {
-            continue;
-        };
-
-        let state = states.entry(SponsorKey::of(sponsor)).or_default();
-        state.sponsor = Some(sponsor.clone());
-        state.public = activity.is_public();
-        state.first_sponsored_at.get_or_insert(timestamp);
-        state.last_activity_at = Some(timestamp);
-
-        match action {
-            SponsorsActivityAction::NewSponsorship => {
-                let Some(tier) = activity.sponsors_tier.as_ref() else {
-                    continue;
-                };
-
-                if tier.is_one_time {
-                    state.one_time_in_cents += tier.monthly_price_in_cents;
-                } else {
-                    if let Some(open) = state.spells.iter_mut().find(|s| s.end.is_none()) {
-                        open.end = Some(timestamp);
-                    }
-
-                    state.spells.push(Spell {
-                        activity_id: activity.id.clone(),
-                        start: timestamp,
-                        end: None,
-                        segments: vec![(timestamp, tier.monthly_price_in_cents)],
-                    });
-                }
-            }
-            SponsorsActivityAction::TierChange => {
-                let Some(tier) = activity.sponsors_tier.as_ref() else {
-                    continue;
-                };
-
-                if let Some(open) = state.spells.iter_mut().find(|s| s.end.is_none()) {
-                    open.segments.push((timestamp, tier.monthly_price_in_cents));
-                }
-            }
-            SponsorsActivityAction::CancelledSponsorship => {
-                if let Some(open) = state.spells.iter_mut().find(|s| s.end.is_none()) {
-                    open.end = Some(timestamp);
-                }
-            }
-            SponsorsActivityAction::Refund => {
-                if let Some(tier) = activity.sponsors_tier.as_ref() {
-                    if tier.is_one_time {
-                        state.one_time_refunded_in_cents += tier.monthly_price_in_cents;
-                    } else {
-                        state.recurring_refunded_in_cents += tier.monthly_price_in_cents;
-                    }
-                }
-            }
-            SponsorsActivityAction::PendingChange
-            | SponsorsActivityAction::SponsorMatchDisabled => {}
-        }
-    }
+pub fn evaluate(ledger: &Ledger) -> Evaluation {
+    let mut states: IndexMap<(Provider, String), SponsorState> = IndexMap::new();
 
     let mut evaluation = Evaluation {
+        currency: ledger.currency.clone(),
+
         monthly_recurring_in_cents: 0,
         one_time_in_cents: 0,
         recurring_in_cents: 0,
         lifetime_in_cents: 0,
+
         active_sponsor_count: 0,
         former_sponsor_count: 0,
         one_time_sponsor_count: 0,
+
         sponsors: Vec::new(),
-        spells: Vec::new(),
+        contributions: Vec::new(),
     };
 
-    for state in states.into_values() {
-        let (Some(sponsor), Some(first_sponsored_at), Some(last_activity_at)) = (
-            state.sponsor,
-            state.first_sponsored_at,
-            state.last_activity_at,
-        ) else {
+    for provider_ledger in &ledger.providers {
+        for contribution in &provider_ledger.contributions {
+            let state = states
+                .entry((contribution.provider, contribution.key.clone()))
+                .or_default();
+
+            if let Some(account) = &contribution.account {
+                state.account = Some(account.clone());
+            }
+
+            state.contributions.push(contribution.clone());
+        }
+    }
+
+    for provider_ledger in &ledger.providers {
+        for refund in &provider_ledger.refunds {
+            let Some(state) = states.get_mut(&(provider_ledger.provider, refund.key.clone()))
+            else {
+                continue;
+            };
+
+            // Refunds are reported against the contributor rather than a single
+            // contribution, so they come off the newest matching one first.
+            let mut remaining = refund.amount_in_cents;
+
+            for contribution in state
+                .contributions
+                .iter_mut()
+                .rev()
+                .filter(|contribution| contribution.recurring == refund.recurring)
+            {
+                if remaining <= 0 {
+                    break;
+                }
+
+                let taken = remaining.min(contribution.paid_in_cents);
+                contribution.paid_in_cents -= taken;
+                remaining -= taken;
+            }
+        }
+    }
+
+    for ((provider, key), state) in states {
+        let Some(first_sponsored_at) = state
+            .contributions
+            .iter()
+            .map(|contribution| contribution.start)
+            .min()
+        else {
             continue;
         };
 
-        let github_id = sponsor.database_id;
+        let last_activity_at = state
+            .contributions
+            .iter()
+            .map(|contribution| contribution.end.unwrap_or(contribution.start))
+            .max()
+            .unwrap_or(first_sponsored_at);
 
+        let mut one_time_in_cents = 0;
         let mut recurring_in_cents = 0;
-        let mut estimated_months_paid = 0;
         let mut monthly_in_cents = 0;
-        let mut recurring = false;
+        let mut estimated_months_paid = 0;
+        let mut recurring_spells = 0;
+        let mut active = false;
 
-        for spell in &state.spells {
-            let (paid_in_cents, months_paid) = spell.evaluate(now);
+        for contribution in &state.contributions {
+            if contribution.recurring {
+                recurring_spells += 1;
+                recurring_in_cents += contribution.paid_in_cents;
+                estimated_months_paid += contribution.months_paid;
 
-            recurring_in_cents += paid_in_cents;
-            estimated_months_paid += months_paid;
-
-            if spell.end.is_none() {
-                recurring = true;
-                monthly_in_cents += spell.monthly_in_cents();
+                if contribution.active() {
+                    active = true;
+                    monthly_in_cents += contribution.monthly_in_cents;
+                }
+            } else {
+                one_time_in_cents += contribution.paid_in_cents;
             }
-
-            evaluation.spells.push(EvaluatedSpell {
-                activity_id: spell.activity_id.clone(),
-                sponsor: state.public.then(|| sponsor.clone()),
-                start: spell.start,
-                end: spell.end,
-                monthly_in_cents: spell.monthly_in_cents(),
-                paid_in_cents,
-                months_paid,
-            });
         }
 
-        let one_time_in_cents = state.one_time_in_cents - state.one_time_refunded_in_cents;
-        let recurring_in_cents = recurring_in_cents - state.recurring_refunded_in_cents;
         let lifetime_in_cents = one_time_in_cents + recurring_in_cents;
 
         evaluation.monthly_recurring_in_cents += monthly_in_cents;
@@ -249,20 +174,23 @@ pub fn evaluate(ledger: &Ledger, now: chrono::DateTime<chrono::Utc>) -> Evaluati
         evaluation.recurring_in_cents += recurring_in_cents;
         evaluation.lifetime_in_cents += lifetime_in_cents;
 
-        if recurring {
+        if active {
             evaluation.active_sponsor_count += 1;
-        } else if !state.spells.is_empty() {
+        } else if recurring_spells > 0 {
             evaluation.former_sponsor_count += 1;
         } else {
             evaluation.one_time_sponsor_count += 1;
         }
 
-        evaluation.sponsors.push(EvaluatedSponsor {
-            github_id,
-            sponsor: state.public.then_some(sponsor),
+        evaluation.contributions.extend(state.contributions);
 
-            active: recurring,
-            recurring_spells: state.spells.len(),
+        evaluation.sponsors.push(EvaluatedSponsor {
+            provider,
+            key,
+            account: state.account,
+
+            active,
+            recurring_spells,
             monthly_in_cents,
 
             one_time_in_cents,
@@ -275,20 +203,34 @@ pub fn evaluate(ledger: &Ledger, now: chrono::DateTime<chrono::Utc>) -> Evaluati
         });
     }
 
-    if let Some(reported) = ledger.monthly_estimated_income_in_cents
-        && reported != evaluation.monthly_recurring_in_cents
-    {
-        tracing::warn!(
-            "reconstructed monthly sponsorship income ({} cents) does not match github's own figure ({} cents)",
-            evaluation.monthly_recurring_in_cents,
-            reported
-        );
+    for provider_ledger in &ledger.providers {
+        let Some(reported) = provider_ledger.reported_monthly_in_cents else {
+            continue;
+        };
+
+        let reconstructed: i64 = evaluation
+            .sponsors
+            .iter()
+            .filter(|sponsor| sponsor.provider == provider_ledger.provider)
+            .map(|sponsor| sponsor.monthly_in_cents)
+            .sum();
+
+        if reported != reconstructed {
+            tracing::warn!(
+                "reconstructed monthly {} income ({} cents) does not match the provider's own figure ({} cents)",
+                provider_ledger.provider.key(),
+                reconstructed,
+                reported
+            );
+        }
     }
 
     evaluation
         .sponsors
         .sort_by_key(|sponsor| std::cmp::Reverse(sponsor.lifetime_in_cents));
-    evaluation.spells.sort_by_key(|spell| spell.start);
+    evaluation
+        .contributions
+        .sort_by_key(|contribution| contribution.start);
 
     evaluation
 }

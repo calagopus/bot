@@ -36,7 +36,7 @@ pub async fn status_command(ctx: crate::BotContext<'_>) -> Result<(), anyhow::Er
                 CreateContainerComponent::Section(CreateSection::new(
                     &[
                         CreateSectionComponent::TextDisplay(CreateTextDisplay::new(
-                            "## Bot Status",
+                            "## <:clock:1150889651914158111> Bot Status",
                         )),
                         CreateSectionComponent::TextDisplay(CreateTextDisplay::new(format!(
                             "**Uptime**: {uptime}

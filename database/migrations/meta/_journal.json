@@ -50,6 +50,27 @@
       "when": 1788510583570,
       "tag": "0006_sleepy_demogoblin",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1788545905025,
+      "tag": "0007_lucky_black_cat",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1788568377613,
+      "tag": "0008_foamy_rhodey",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1788633709304,
+      "tag": "0009_magical_rocket_racer",
+      "breakpoints": true
     }
   ]
 }

@@ -1,0 +1,1 @@
+ALTER TABLE `sent_sponsorships` ADD `currency` text;

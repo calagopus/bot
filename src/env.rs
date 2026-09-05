@@ -12,12 +12,20 @@ pub struct Env {
     pub antimention_whitelisted_role_ids: Vec<u64>,
 
     pub github_channel_id: u64,
-    pub github_sponsors_channel_id: Option<u64>,
     pub github_sponsors_login: Option<String>,
     pub github_verify_token: String,
     pub github_token: Option<String>,
     pub github_oauth_client_id: Option<String>,
     pub github_oauth_client_secret: Option<String>,
+
+    pub opencollective_slug: Option<String>,
+    pub opencollective_token: Option<String>,
+    pub opencollective_oauth_client_id: Option<String>,
+    pub opencollective_oauth_client_secret: Option<String>,
+
+    pub sponsors_channel_id: Option<u64>,
+    pub sponsors_currency: String,
+    pub sponsors_message_currency: String,
 
     pub donator_tiers: Vec<crate::tiers::Tier>,
     pub sponsor_tiers: Vec<crate::tiers::Tier>,
@@ -39,6 +47,12 @@ pub struct Env {
 impl Env {
     pub fn parse() -> (tracing_appender::non_blocking::WorkerGuard, Env) {
         dotenv().ok();
+
+        let sponsors_currency = std::env::var("SPONSORS_CURRENCY")
+            .ok()
+            .map(|s| s.trim_matches('"').to_uppercase())
+            .filter(|s| !s.is_empty())
+            .unwrap_or("USD".to_string());
 
         let env = Self {
             sentry_url: std::env::var("SENTRY_URL")
@@ -71,11 +85,6 @@ impl Env {
                 .trim_matches('"')
                 .parse()
                 .unwrap(),
-            github_sponsors_channel_id: std::env::var("GITHUB_SPONSORS_CHANNEL_ID")
-                .map(|c| c.trim_matches('"').to_string())
-                .unwrap_or("".to_string())
-                .parse()
-                .ok(),
             github_sponsors_login: std::env::var("GITHUB_SPONSORS_LOGIN")
                 .ok()
                 .map(|s| s.trim_matches('"').to_string()),
@@ -94,6 +103,36 @@ impl Env {
                 .ok()
                 .map(|s| s.trim_matches('"').to_string())
                 .filter(|s| !s.is_empty()),
+
+            opencollective_slug: std::env::var("OPENCOLLECTIVE_SLUG")
+                .ok()
+                .map(|s| s.trim_matches('"').to_string())
+                .filter(|s| !s.is_empty()),
+            opencollective_token: std::env::var("OPENCOLLECTIVE_TOKEN")
+                .ok()
+                .map(|s| s.trim_matches('"').to_string())
+                .filter(|s| !s.is_empty()),
+            opencollective_oauth_client_id: std::env::var("OPENCOLLECTIVE_OAUTH_CLIENT_ID")
+                .ok()
+                .map(|s| s.trim_matches('"').to_string())
+                .filter(|s| !s.is_empty()),
+            opencollective_oauth_client_secret: std::env::var("OPENCOLLECTIVE_OAUTH_CLIENT_SECRET")
+                .ok()
+                .map(|s| s.trim_matches('"').to_string())
+                .filter(|s| !s.is_empty()),
+
+            sponsors_channel_id: std::env::var("SPONSORS_CHANNEL_ID")
+                .or_else(|_| std::env::var("GITHUB_SPONSORS_CHANNEL_ID"))
+                .map(|c| c.trim_matches('"').to_string())
+                .unwrap_or("".to_string())
+                .parse()
+                .ok(),
+            sponsors_message_currency: std::env::var("SPONSORS_MESSAGE_CURRENCY")
+                .ok()
+                .map(|s| s.trim_matches('"').to_uppercase())
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| sponsors_currency.clone()),
+            sponsors_currency,
 
             donator_tiers: crate::tiers::parse(
                 std::env::var("DONATOR_TIERS")

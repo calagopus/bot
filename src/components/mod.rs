@@ -1,4 +1,7 @@
+mod sponsor_unlink;
 mod text_message_roles;
+
+pub const SPONSOR_UNLINK_ID: &str = "sponsor_unlink:";
 
 #[async_trait::async_trait]
 pub trait Component {
@@ -44,4 +47,5 @@ impl ComponentList {
 
 pub fn components(list: ComponentList) -> ComponentList {
     list.add_component(text_message_roles::TextMessageRoles)
+        .add_component(sponsor_unlink::SponsorUnlink)
 }

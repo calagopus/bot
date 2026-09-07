@@ -17,15 +17,16 @@ pub struct Env {
     pub github_token: Option<String>,
     pub github_oauth_client_id: Option<String>,
     pub github_oauth_client_secret: Option<String>,
+    pub github_sponsors_message_currency: Option<String>,
 
     pub opencollective_slug: Option<String>,
     pub opencollective_token: Option<String>,
     pub opencollective_oauth_client_id: Option<String>,
     pub opencollective_oauth_client_secret: Option<String>,
+    pub opencollective_message_currency: Option<String>,
 
     pub sponsors_channel_id: Option<u64>,
     pub sponsors_currency: String,
-    pub sponsors_message_currency: String,
 
     pub donator_tiers: Vec<crate::tiers::Tier>,
     pub sponsor_tiers: Vec<crate::tiers::Tier>,
@@ -47,12 +48,6 @@ pub struct Env {
 impl Env {
     pub fn parse() -> (tracing_appender::non_blocking::WorkerGuard, Env) {
         dotenv().ok();
-
-        let sponsors_currency = std::env::var("SPONSORS_CURRENCY")
-            .ok()
-            .map(|s| s.trim_matches('"').to_uppercase())
-            .filter(|s| !s.is_empty())
-            .unwrap_or("USD".to_string());
 
         let env = Self {
             sentry_url: std::env::var("SENTRY_URL")
@@ -103,6 +98,10 @@ impl Env {
                 .ok()
                 .map(|s| s.trim_matches('"').to_string())
                 .filter(|s| !s.is_empty()),
+            github_sponsors_message_currency: std::env::var("GITHUB_SPONSORS_MESSAGE_CURRENCY")
+                .ok()
+                .map(|s| s.trim_matches('"').to_uppercase())
+                .filter(|s| !s.is_empty()),
 
             opencollective_slug: std::env::var("OPENCOLLECTIVE_SLUG")
                 .ok()
@@ -120,6 +119,10 @@ impl Env {
                 .ok()
                 .map(|s| s.trim_matches('"').to_string())
                 .filter(|s| !s.is_empty()),
+            opencollective_message_currency: std::env::var("OPENCOLLECTIVE_MESSAGE_CURRENCY")
+                .ok()
+                .map(|s| s.trim_matches('"').to_uppercase())
+                .filter(|s| !s.is_empty()),
 
             sponsors_channel_id: std::env::var("SPONSORS_CHANNEL_ID")
                 .or_else(|_| std::env::var("GITHUB_SPONSORS_CHANNEL_ID"))
@@ -127,12 +130,11 @@ impl Env {
                 .unwrap_or("".to_string())
                 .parse()
                 .ok(),
-            sponsors_message_currency: std::env::var("SPONSORS_MESSAGE_CURRENCY")
+            sponsors_currency: std::env::var("SPONSORS_CURRENCY")
                 .ok()
                 .map(|s| s.trim_matches('"').to_uppercase())
                 .filter(|s| !s.is_empty())
-                .unwrap_or_else(|| sponsors_currency.clone()),
-            sponsors_currency,
+                .unwrap_or("USD".to_string()),
 
             donator_tiers: crate::tiers::parse(
                 std::env::var("DONATOR_TIERS")

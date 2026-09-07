@@ -41,10 +41,13 @@ struct Rendered<'a> {
 
 async fn render<'a>(
     env: &'a crate::env::Env,
-    contribution: &Contribution,
+    contribution: &'a Contribution,
 ) -> Result<Rendered<'a>, anyhow::Error> {
-    let currency = env.sponsors_message_currency.as_str();
     let native = contribution.native_currency.as_str();
+    let currency = contribution
+        .provider
+        .message_currency(env)
+        .unwrap_or(native);
 
     Ok(Rendered {
         currency,

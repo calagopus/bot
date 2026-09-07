@@ -62,6 +62,16 @@ impl Provider {
         }
     }
 
+    /// Currency the provider's announcement messages show, `None` to keep the currency
+    /// the contributor was charged in.
+    #[inline]
+    pub fn message_currency(self, env: &crate::env::Env) -> Option<&str> {
+        match self {
+            Self::GitHub => env.github_sponsors_message_currency.as_deref(),
+            Self::OpenCollective => env.opencollective_message_currency.as_deref(),
+        }
+    }
+
     #[inline]
     pub fn contribute_url(self, env: &crate::env::Env) -> String {
         match self {

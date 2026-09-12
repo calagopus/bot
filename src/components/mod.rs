@@ -1,7 +1,10 @@
+pub mod ai_support;
 mod sponsor_unlink;
 mod text_message_roles;
 
 pub const SPONSOR_UNLINK_ID: &str = "sponsor_unlink:";
+pub const AI_SUPPORT_TOGGLE_ID: &str = "ai_support_toggle:";
+pub const AI_SUPPORT_RESOLVE_ID: &str = "ai_support_resolve:";
 
 #[async_trait::async_trait]
 pub trait Component {
@@ -48,4 +51,6 @@ impl ComponentList {
 pub fn components(list: ComponentList) -> ComponentList {
     list.add_component(text_message_roles::TextMessageRoles)
         .add_component(sponsor_unlink::SponsorUnlink)
+        .add_component(ai_support::AiSupportToggle)
+        .add_component(ai_support::AiSupportResolve)
 }

@@ -33,6 +33,15 @@ pub struct Env {
     pub donator_base_role_id: Option<u64>,
     pub sponsor_base_role_id: Option<u64>,
 
+    pub openrouter_api_key: Option<String>,
+    pub ai_support_channel_id: Option<u64>,
+    pub ai_support_role_ids: Vec<u64>,
+    pub ai_support_model: String,
+    pub ai_support_triage_model: String,
+    pub ai_support_mcp_url: String,
+    pub ai_support_unresolved_tag_id: Option<u64>,
+    pub ai_support_resolved_tag_id: Option<u64>,
+
     pub guild_id: Option<u64>,
     pub bot_token: String,
 
@@ -153,6 +162,47 @@ impl Env {
                 .ok(),
             sponsor_base_role_id: std::env::var("SPONSOR_BASE_ROLE_ID")
                 .map(|r| r.trim_matches('"').to_string())
+                .unwrap_or("".to_string())
+                .parse()
+                .ok(),
+
+            openrouter_api_key: std::env::var("OPENROUTER_API_KEY")
+                .ok()
+                .map(|s| s.trim_matches('"').to_string())
+                .filter(|s| !s.is_empty()),
+            ai_support_channel_id: std::env::var("AI_SUPPORT_CHANNEL_ID")
+                .map(|c| c.trim_matches('"').to_string())
+                .unwrap_or("".to_string())
+                .parse()
+                .ok(),
+            ai_support_role_ids: std::env::var("AI_SUPPORT_ROLE_IDS")
+                .unwrap_or("".to_string())
+                .trim_matches('"')
+                .split(',')
+                .filter_map(|s| s.trim().parse().ok())
+                .collect(),
+            ai_support_model: std::env::var("AI_SUPPORT_MODEL")
+                .ok()
+                .map(|s| s.trim_matches('"').to_string())
+                .filter(|s| !s.is_empty())
+                .unwrap_or("z-ai/glm-5.3-flash".to_string()),
+            ai_support_triage_model: std::env::var("AI_SUPPORT_TRIAGE_MODEL")
+                .ok()
+                .map(|s| s.trim_matches('"').to_string())
+                .filter(|s| !s.is_empty())
+                .unwrap_or("z-ai/glm-5.3-flash".to_string()),
+            ai_support_mcp_url: std::env::var("AI_SUPPORT_MCP_URL")
+                .ok()
+                .map(|s| s.trim_matches('"').to_string())
+                .filter(|s| !s.is_empty())
+                .unwrap_or("https://calagopus.com/mcp".to_string()),
+            ai_support_unresolved_tag_id: std::env::var("AI_SUPPORT_UNRESOLVED_TAG_ID")
+                .map(|t| t.trim_matches('"').to_string())
+                .unwrap_or("".to_string())
+                .parse()
+                .ok(),
+            ai_support_resolved_tag_id: std::env::var("AI_SUPPORT_RESOLVED_TAG_ID")
+                .map(|t| t.trim_matches('"').to_string())
                 .unwrap_or("".to_string())
                 .parse()
                 .ok(),

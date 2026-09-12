@@ -75,3 +75,15 @@ export const sponsorProviders = sqliteTable('sponsor_providers', {
 
 	seeded: integer('seeded', { mode: 'timestamp' }).default(sql`(strftime('%s','now'))`).notNull(),
 })
+
+export const aiSupportThreads = sqliteTable('ai_support_threads', {
+	threadId: integer('thread_id').primaryKey().notNull(),
+	messageId: integer('message_id'),
+	ownerId: integer('owner_id'),
+
+	enabled: integer('enabled', { mode: 'boolean' }).default(false).notNull(),
+	paused: integer('paused', { mode: 'boolean' }).default(false).notNull(),
+	resolved: integer('resolved', { mode: 'boolean' }).default(false).notNull(),
+
+	created: integer('created', { mode: 'timestamp' }).default(sql`(strftime('%s','now'))`).notNull(),
+})

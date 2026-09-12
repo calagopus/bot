@@ -19,6 +19,7 @@ use tower_http::{cors::CorsLayer, normalize_path::NormalizePathLayer};
 use utoipa::openapi::security::{ApiKey, ApiKeyValue, SecurityScheme};
 use utoipa_axum::router::OpenApiRouter;
 
+mod ai;
 mod commands;
 mod components;
 mod database;

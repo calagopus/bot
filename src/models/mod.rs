@@ -1,3 +1,5 @@
+mod ai_support_thread;
+pub use ai_support_thread::*;
 mod github_message;
 pub use github_message::*;
 mod text_message;

@@ -373,16 +373,12 @@ query($slug: String!, $limit: Int!, $offset: Int!) {
 }
 "#;
 
-async fn collect_pages<T, D, F>(
+async fn collect_pages<T, D: serde::de::DeserializeOwned, F: Fn(D) -> Collection<T>>(
     env: &crate::env::Env,
     slug: &str,
     query: &str,
     pick: F,
-) -> Result<Vec<T>, anyhow::Error>
-where
-    D: serde::de::DeserializeOwned,
-    F: Fn(D) -> Collection<T>,
-{
+) -> Result<Vec<T>, anyhow::Error> {
     let mut collected = Vec::new();
     let mut offset = 0;
 

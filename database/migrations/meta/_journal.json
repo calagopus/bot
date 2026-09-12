@@ -71,6 +71,13 @@
       "when": 1788633709304,
       "tag": "0009_magical_rocket_racer",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1788779528155,
+      "tag": "0010_eminent_machine_man",
+      "breakpoints": true
     }
   ]
 }

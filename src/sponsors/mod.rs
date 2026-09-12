@@ -12,11 +12,9 @@ pub use task::*;
 
 /// Treats a value the API added since this was written as absent, so one unknown enum
 /// variant cannot fail the whole page.
-pub fn unknown_as_none<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-    T: serde::de::DeserializeOwned,
-{
+pub fn unknown_as_none<'de, D: serde::Deserializer<'de>, T: serde::de::DeserializeOwned>(
+    deserializer: D,
+) -> Result<Option<T>, D::Error> {
     let value = serde_json::Value::deserialize(deserializer)?;
 
     Ok(T::deserialize(value).ok())

@@ -30,9 +30,20 @@ impl serenity::all::RawEventHandler for EventHandler {
                         "bot connected"
                     );
                 }
+                Event::ThreadCreate(event) => {
+                    if event.newly_created == Some(true) {
+                        crate::ai::handle_thread_create(&state, &ctx, &event.thread).await?;
+                    }
+                }
                 Event::MessageCreate(event) => {
                     if event.message.author.bot() {
                         return Ok(());
+                    }
+
+                    if let Err(err) = crate::ai::handle_message_create(&state, &event.message).await
+                    {
+                        tracing::error!("ai support failed to handle a message: {:?}", err);
+                        sentry_anyhow::capture_anyhow(&err);
                     }
 
                     if event.message.mentions_me(&ctx.http).await? {

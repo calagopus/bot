@@ -51,10 +51,7 @@ impl ApiResponse {
     }
 }
 
-impl<T> From<T> for ApiResponse
-where
-    T: Into<anyhow::Error>,
-{
+impl<T: Into<anyhow::Error>> From<T> for ApiResponse {
     #[inline]
     fn from(err: T) -> Self {
         let err: anyhow::Error = err.into();

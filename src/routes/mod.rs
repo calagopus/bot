@@ -32,6 +32,7 @@ pub struct InnerState {
 
     pub env: Arc<crate::env::Env>,
     pub database: Arc<crate::database::Database>,
+    pub storage: Option<crate::storage::Storage>,
     pub bot: RwLock<Arc<serenity::http::Http>>,
 }
 

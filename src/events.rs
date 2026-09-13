@@ -128,20 +128,32 @@ impl serenity::all::RawEventHandler for EventHandler {
                         }
                     }
                 }
-                Event::InteractionCreate(event) => {
-                    if let Interaction::Component(component) = &event.interaction
-                        && self
+                Event::InteractionCreate(event) => match &event.interaction {
+                    Interaction::Component(component) => {
+                        if self
                             .components
                             .execute_component(&state, &ctx, component)
                             .await?
                             .is_none()
-                    {
-                        tracing::warn!(
-                            interaction_id = %component.id,
-                            "no component found for interaction"
-                        );
+                        {
+                            tracing::warn!(
+                                interaction_id = %component.id,
+                                "no component found for interaction"
+                            );
+                        }
                     }
-                }
+                    Interaction::Modal(modal) => {
+                        let handled = crate::modals::execute_modal(&state, &ctx, modal).await?;
+
+                        if handled.is_none() {
+                            tracing::debug!(
+                                interaction_id = %modal.id,
+                                "no modal found for interaction"
+                            );
+                        }
+                    }
+                    _ => {}
+                },
                 _ => {}
             }
 

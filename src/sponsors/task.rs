@@ -592,9 +592,11 @@ async fn run(
     }
 
     let synced = sync_tier_roles(state, &ledger, &evaluation).await;
+    let sections = super::run_sections(state, &ledger, &evaluation).await;
 
     announced?;
     synced?;
+    sections?;
 
     Ok(())
 }
@@ -603,7 +605,10 @@ pub fn spawn_sponsor_updates_task(state: crate::routes::State) {
     tokio::spawn(async move {
         let tiers_configured = crate::tiers::is_configured(&state.env);
 
-        if state.env.sponsors_channel_id.is_none() && !tiers_configured {
+        if state.env.sponsors_channel_id.is_none()
+            && !tiers_configured
+            && !super::sections_configured(&state.env)
+        {
             return;
         }
 

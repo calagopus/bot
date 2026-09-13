@@ -28,6 +28,16 @@ pub struct Env {
     pub sponsors_channel_id: Option<u64>,
     pub sponsors_currency: String,
 
+    pub sponsor_sections_channel_id: Option<u64>,
+
+    pub s3_endpoint: Option<String>,
+    pub s3_region: String,
+    pub s3_bucket: Option<String>,
+    pub s3_access_key: Option<String>,
+    pub s3_secret_key: Option<String>,
+    pub s3_path_style: bool,
+    pub s3_public_url: Option<String>,
+
     pub donator_tiers: Vec<crate::tiers::Tier>,
     pub sponsor_tiers: Vec<crate::tiers::Tier>,
     pub donator_base_role_id: Option<u64>,
@@ -144,6 +154,43 @@ impl Env {
                 .map(|s| s.trim_matches('"').to_uppercase())
                 .filter(|s| !s.is_empty())
                 .unwrap_or("USD".to_string()),
+
+            sponsor_sections_channel_id: std::env::var("SPONSOR_SECTIONS_CHANNEL_ID")
+                .map(|c| c.trim_matches('"').to_string())
+                .unwrap_or("".to_string())
+                .parse()
+                .ok(),
+
+            s3_endpoint: std::env::var("S3_ENDPOINT")
+                .ok()
+                .map(|s| s.trim_matches('"').to_string())
+                .filter(|s| !s.is_empty()),
+            s3_region: std::env::var("S3_REGION")
+                .ok()
+                .map(|s| s.trim_matches('"').to_string())
+                .filter(|s| !s.is_empty())
+                .unwrap_or("auto".to_string()),
+            s3_bucket: std::env::var("S3_BUCKET")
+                .ok()
+                .map(|s| s.trim_matches('"').to_string())
+                .filter(|s| !s.is_empty()),
+            s3_access_key: std::env::var("S3_ACCESS_KEY")
+                .ok()
+                .map(|s| s.trim_matches('"').to_string())
+                .filter(|s| !s.is_empty()),
+            s3_secret_key: std::env::var("S3_SECRET_KEY")
+                .ok()
+                .map(|s| s.trim_matches('"').to_string())
+                .filter(|s| !s.is_empty()),
+            s3_path_style: std::env::var("S3_PATH_STYLE")
+                .unwrap_or("true".to_string())
+                .trim_matches('"')
+                .parse()
+                .unwrap(),
+            s3_public_url: std::env::var("S3_PUBLIC_URL")
+                .ok()
+                .map(|s| s.trim_matches('"').to_string())
+                .filter(|s| !s.is_empty()),
 
             donator_tiers: crate::tiers::parse(
                 std::env::var("DONATOR_TIERS")

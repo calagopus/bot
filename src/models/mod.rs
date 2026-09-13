@@ -10,3 +10,7 @@ mod linked_account;
 pub use linked_account::*;
 mod sponsor_provider;
 pub use sponsor_provider::*;
+mod sponsor_balance;
+pub use sponsor_balance::*;
+mod sponsor_section;
+pub use sponsor_section::*;

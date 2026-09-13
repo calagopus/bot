@@ -6,6 +6,13 @@ pub struct LinkedAccount {
     pub provider_id: String,
     pub login: Option<String>,
     pub discord_user_id: Option<i64>,
+
+    /// High-water mark of what the ledger reported for this account, already credited to
+    /// whoever it was linked to at the time. Held per account so relinking moves the credit
+    /// with it instead of paying it out twice.
+    pub lifetime_cents: i64,
+    /// How much of a drop below [`LinkedAccount::lifetime_cents`] moderators were told about.
+    pub refunded_cents: i64,
 }
 
 impl LinkedAccount {
@@ -22,6 +29,8 @@ impl FromRow<'_, SqliteRow> for LinkedAccount {
             provider_id: row.try_get("provider_id")?,
             login: row.try_get("login")?,
             discord_user_id: row.try_get("discord_user_id")?,
+            lifetime_cents: row.try_get("lifetime_cents")?,
+            refunded_cents: row.try_get("refunded_cents")?,
         })
     }
 }
@@ -139,4 +148,42 @@ pub async fn unlink_discord_user(
     .await?;
 
     Ok(accounts)
+}
+
+/// Moves the account's high-water mark up to what the ledger now reports. The difference is
+/// what the member has gained to spend since the last poll.
+pub async fn credit_linked_account(
+    pool: &sqlx::SqlitePool,
+    provider: crate::sponsors::Provider,
+    provider_id: &str,
+    lifetime_cents: i64,
+) -> Result<(), anyhow::Error> {
+    sqlx::query(
+        "UPDATE linked_accounts SET lifetime_cents = ? WHERE provider = ? AND provider_id = ?",
+    )
+    .bind(lifetime_cents)
+    .bind(provider.key())
+    .bind(provider_id)
+    .execute(pool)
+    .await?;
+
+    Ok(())
+}
+
+pub async fn set_linked_account_refunded(
+    pool: &sqlx::SqlitePool,
+    provider: crate::sponsors::Provider,
+    provider_id: &str,
+    refunded_cents: i64,
+) -> Result<(), anyhow::Error> {
+    sqlx::query(
+        "UPDATE linked_accounts SET refunded_cents = ? WHERE provider = ? AND provider_id = ?",
+    )
+    .bind(refunded_cents)
+    .bind(provider.key())
+    .bind(provider_id)
+    .execute(pool)
+    .await?;
+
+    Ok(())
 }

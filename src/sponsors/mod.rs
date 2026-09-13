@@ -7,6 +7,8 @@ mod evaluate;
 pub use evaluate::*;
 pub mod github;
 pub mod opencollective;
+mod sections;
+pub use sections::*;
 mod task;
 pub use task::*;
 

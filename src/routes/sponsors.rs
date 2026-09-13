@@ -169,8 +169,91 @@ mod get {
     }
 }
 
+mod sections {
+    use crate::{
+        response::{ApiResponse, ApiResponseResult},
+        routes::{ApiError, GetState},
+        sponsors::SectionTier,
+    };
+    use axum::http::StatusCode;
+    use serde::Serialize;
+    use utoipa::ToSchema;
+
+    nestify::nest! {
+        #[derive(ToSchema, Serialize)]
+        struct Response {
+            currency: String,
+
+            sections: Vec<#[derive(ToSchema, Serialize)] struct ResponseSection {
+                #[schema(inline)]
+                discord_user_id: String,
+                tier_cents: i64,
+
+                name: String,
+                description: Option<String>,
+                logo_url: Option<String>,
+                link: Option<String>,
+
+                #[schema(inline)]
+                since: chrono::DateTime<chrono::Utc>,
+            }>,
+        }
+    }
+
+    #[utoipa::path(get, path = "/", responses(
+        (status = OK, body = inline(Response)),
+        (status = SERVICE_UNAVAILABLE, body = ApiError),
+    ))]
+    pub async fn route(state: GetState) -> ApiResponseResult {
+        if !crate::sponsors::sections_configured(&state.env) {
+            return ApiResponse::error("sponsor sections are not configured")
+                .with_status(StatusCode::SERVICE_UNAVAILABLE)
+                .ok();
+        }
+
+        let sections = crate::models::active_sponsor_sections(state.database.read())
+            .await?
+            .into_iter()
+            .map(|section| {
+                // Only hand out what the tier was paid for, whatever the row still holds from
+                // a tier the sponsor has since dropped.
+                let tier = SectionTier::from_cents(section.tier_cents);
+
+                ResponseSection {
+                    discord_user_id: (section.discord_user_id as u64).to_string(),
+                    tier_cents: section.tier_cents,
+
+                    name: section.name,
+                    description: section
+                        .description
+                        .filter(|_| tier.is_some_and(SectionTier::has_description)),
+                    logo_url: crate::sponsors::logo_url(&state, section.logo_path.as_deref())
+                        .filter(|_| tier.is_some_and(SectionTier::has_logo)),
+                    link: section
+                        .link
+                        .filter(|_| tier.is_some_and(SectionTier::has_link)),
+
+                    since: section.period_start,
+                }
+            })
+            .collect();
+
+        ApiResponse::json(Response {
+            currency: state.env.sponsors_currency.clone(),
+            sections,
+        })
+        .ok()
+    }
+}
+
 pub fn router(state: &State) -> OpenApiRouter<State> {
     OpenApiRouter::new()
         .routes(routes!(get::route))
+        .nest(
+            "/sections",
+            OpenApiRouter::new()
+                .routes(routes!(sections::route))
+                .with_state(state.clone()),
+        )
         .with_state(state.clone())
 }

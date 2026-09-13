@@ -31,6 +31,7 @@ mod oauth;
 mod response;
 mod routes;
 mod sponsors;
+mod storage;
 mod tiers;
 mod utils;
 
@@ -92,6 +93,7 @@ async fn main() {
 
         env: env.clone(),
         database: Arc::new(database::Database::new(env.clone()).await),
+        storage: storage::Storage::new(&env),
         bot: RwLock::new(Arc::new(serenity::http::Http::new(
             Token::from_str(&env.bot_token).unwrap(),
         ))),

@@ -1,4 +1,4 @@
-import { isNotNull, sql } from "drizzle-orm"
+import { isNotNull, isNull, sql } from "drizzle-orm"
 import { index, integer, text, sqliteTable, uniqueIndex } from "drizzle-orm/sqlite-core"
 
 export const githubMessages = sqliteTable('github_messages', {
@@ -44,6 +44,9 @@ export const linkedAccounts = sqliteTable('linked_accounts', {
 
 	discordUserId: integer('discord_user_id'),
 
+	lifetimeCents: integer('lifetime_cents').default(0).notNull(),
+	refundedCents: integer('refunded_cents').default(0).notNull(),
+
 	created: integer('created', { mode: 'timestamp' }).default(sql`(strftime('%s','now'))`).notNull(),
 }, (linkedAccounts) => [
 	uniqueIndex('linked_accounts_provider_id_idx').on(linkedAccounts.provider, linkedAccounts.providerId),
@@ -87,3 +90,54 @@ export const aiSupportThreads = sqliteTable('ai_support_threads', {
 
 	created: integer('created', { mode: 'timestamp' }).default(sql`(strftime('%s','now'))`).notNull(),
 })
+
+export const sponsorBalances = sqliteTable('sponsor_balances', {
+	discordUserId: integer('discord_user_id').primaryKey().notNull(),
+
+	availableCents: integer('available_cents').default(0).notNull(),
+
+	created: integer('created', { mode: 'timestamp' }).default(sql`(strftime('%s','now'))`).notNull(),
+})
+
+export const sponsorSections = sqliteTable('sponsor_sections', {
+	discordUserId: integer('discord_user_id').primaryKey().notNull(),
+
+	tierCents: integer('tier_cents').notNull(),
+
+	name: text('name').notNull(),
+	description: text('description'),
+	logoPath: text('logo_path'),
+	link: text('link'),
+
+	active: integer('active', { mode: 'boolean' }).default(false).notNull(),
+	renewalWarned: integer('renewal_warned', { mode: 'boolean' }).default(false).notNull(),
+
+	periodStart: integer('period_start', { mode: 'timestamp' }).notNull(),
+	periodEnd: integer('period_end', { mode: 'timestamp' }).notNull(),
+
+	created: integer('created', { mode: 'timestamp' }).default(sql`(strftime('%s','now'))`).notNull(),
+}, (sponsorSections) => [
+	index('sponsor_sections_active_idx').on(sponsorSections.active)
+])
+
+export const sponsorSectionRequests = sqliteTable('sponsor_section_requests', {
+	id: integer('id').primaryKey({ autoIncrement: true }).notNull(),
+
+	discordUserId: integer('discord_user_id').notNull(),
+
+	tierCents: integer('tier_cents').notNull(),
+
+	name: text('name').notNull(),
+	description: text('description'),
+	logoPath: text('logo_path'),
+	link: text('link'),
+
+	messageId: integer('message_id'),
+
+	approved: integer('approved', { mode: 'boolean' }).default(false).notNull(),
+	decided: integer('decided', { mode: 'timestamp' }),
+
+	created: integer('created', { mode: 'timestamp' }).default(sql`(strftime('%s','now'))`).notNull(),
+}, (sponsorSectionRequests) => [
+	uniqueIndex('sponsor_section_requests_pending_idx').on(sponsorSectionRequests.discordUserId).where(isNull(sponsorSectionRequests.decided))
+])

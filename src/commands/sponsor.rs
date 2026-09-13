@@ -3,7 +3,8 @@ use poise::CreateReply;
 use serenity::all::{
     ButtonStyle, CreateActionRow, CreateButton, CreateComponent, CreateContainer,
     CreateContainerComponent, CreateSection, CreateSectionAccessory, CreateSectionComponent,
-    CreateSeparator, CreateTextDisplay, CreateThumbnail, CreateUnfurledMediaItem, MessageFlags,
+    CreateSelectMenu, CreateSelectMenuKind, CreateSelectMenuOption, CreateSeparator,
+    CreateTextDisplay, CreateThumbnail, CreateUnfurledMediaItem, MessageFlags,
 };
 
 /// View sponsorship information.
@@ -14,7 +15,8 @@ use serenity::all::{
         "sponsor_status_command",
         "sponsor_tiers_command",
         "sponsor_link_command",
-        "sponsor_unlink_command"
+        "sponsor_unlink_command",
+        "sponsor_section_command"
     )
 )]
 pub async fn sponsor_command(_ctx: crate::BotContext<'_>) -> Result<(), anyhow::Error> {
@@ -27,6 +29,7 @@ const HEADING_UNLINK: &str = "## <:hammer:1150889684227076227> Unlink your accou
 pub const HEADING_LINKED: &str = "## <:hammer:1150889684227076227> Account linked";
 pub const HEADING_UNLINKED: &str = "## <:hammer:1150889684227076227> Account unlinked";
 const HEADING_TIERS: &str = "## <:cash:1150889514236137605> Sponsorship tiers";
+const HEADING_SECTION: &str = "## <:cash:1150889514236137605> Your spot on the website";
 
 fn tier_lines(tiers: &[crate::tiers::Tier], currency: &str) -> String {
     tiers
@@ -509,6 +512,155 @@ pub async fn sponsor_status_command(ctx: crate::BotContext<'_>) -> Result<(), an
     ctx.send(
         CreateReply::default()
             .components(&[CreateComponent::Container(CreateContainer::new(components))])
+            .flags(MessageFlags::IS_COMPONENTS_V2)
+            .ephemeral(true),
+    )
+    .await?;
+
+    Ok(())
+}
+
+/// The `/sponsor section` message, re-rendered by the cancel button once a section ends.
+pub async fn section_components<'a>(
+    state: &crate::routes::State,
+    discord_user_id: i64,
+) -> Result<Vec<CreateComponent<'a>>, anyhow::Error> {
+    let currency = state.env.sponsors_currency.as_str();
+
+    let linked =
+        crate::models::find_linked_accounts_by_discord(state.database.read(), discord_user_id)
+            .await?;
+    let contributed: i64 = linked.iter().map(|account| account.lifetime_cents).sum();
+    let available = crate::models::available_cents(state.database.read(), discord_user_id).await?;
+    let section =
+        crate::models::find_sponsor_section(state.database.read(), discord_user_id).await?;
+    let pending =
+        crate::models::find_pending_sponsor_section_request(state.database.read(), discord_user_id)
+            .await?;
+
+    let refund = section
+        .as_ref()
+        .map(|section| crate::sponsors::refund_cents(section, chrono::Utc::now()))
+        .unwrap_or(0);
+    let spendable = available + refund;
+
+    let mut components = vec![
+        CreateContainerComponent::TextDisplay(CreateTextDisplay::new(HEADING_SECTION)),
+        CreateContainerComponent::TextDisplay(CreateTextDisplay::new(format!(
+            "**Funds**: `{}` left to spend, `{}` contributed in total",
+            amount(available, currency),
+            amount(contributed, currency)
+        ))),
+        CreateContainerComponent::Separator(CreateSeparator::new()),
+    ];
+
+    components.push(CreateContainerComponent::TextDisplay(
+        CreateTextDisplay::new(match &section {
+            Some(section) if section.active => format!(
+                "**{}** is on the website for `{}`, renewing <t:{}:R>.",
+                section.name,
+                amount(section.tier_cents, currency),
+                section.period_end.timestamp()
+            ),
+            Some(section) => format!(
+                "**{}** is saved but not on the website. Buying a tier again puts it back.",
+                section.name
+            ),
+            None => {
+                "You do not have a spot on the website yet. Pick a tier to ask for one.".to_string()
+            }
+        }),
+    ));
+
+    if pending.is_some() {
+        components.push(CreateContainerComponent::TextDisplay(
+            CreateTextDisplay::new(
+                "Your change is waiting for a moderator. You can send another once it has been approved or denied.",
+            ),
+        ));
+
+        return Ok(vec![CreateComponent::Container(CreateContainer::new(
+            components,
+        ))]);
+    }
+
+    let options =
+        crate::sponsors::SectionTier::ALL
+            .into_iter()
+            .map(|tier| {
+                CreateSelectMenuOption::new(tier.label(), tier.cents().to_string())
+                    .description(format!(
+                        "{} every {} days",
+                        amount(tier.cents(), currency),
+                        crate::sponsors::PERIOD_DAYS
+                    ))
+                    .default_selection(section.as_ref().is_some_and(|section| {
+                        section.active && section.tier_cents == tier.cents()
+                    }))
+            })
+            .collect::<Vec<_>>();
+
+    components.push(CreateContainerComponent::Separator(CreateSeparator::new()));
+    components.push(CreateContainerComponent::ActionRow(
+        CreateActionRow::SelectMenu(
+            CreateSelectMenu::new(
+                crate::components::SPONSOR_SECTION_BUY_ID,
+                CreateSelectMenuKind::String {
+                    options: options.into(),
+                },
+            )
+            .placeholder(format!(
+                "Pick a tier - {} left to spend",
+                amount(spendable, currency)
+            )),
+        ),
+    ));
+
+    if section.as_ref().is_some_and(|section| section.active) {
+        components.push(CreateContainerComponent::ActionRow(
+            CreateActionRow::Buttons(
+                vec![
+                    CreateButton::new(crate::components::SPONSOR_SECTION_CANCEL_ID)
+                        .label(format!("Cancel, get {} back", amount(refund, currency)))
+                        .style(ButtonStyle::Danger),
+                ]
+                .into(),
+            ),
+        ));
+    }
+
+    components.push(CreateContainerComponent::TextDisplay(
+        CreateTextDisplay::new(format!(
+            "-# Every change is approved by a moderator before it goes live. A tier is paid upfront and charged again every {} days; cancelling gives back the days you did not use.",
+            crate::sponsors::PERIOD_DAYS
+        )),
+    ));
+
+    Ok(vec![CreateComponent::Container(CreateContainer::new(
+        components,
+    ))])
+}
+
+/// Buy or change your spot in the website's sponsors section.
+#[poise::command(slash_command, rename = "section")]
+pub async fn sponsor_section_command(ctx: crate::BotContext<'_>) -> Result<(), anyhow::Error> {
+    let data = ctx.data();
+
+    if !crate::sponsors::sections_configured(&data.env) {
+        ctx.send(
+            CreateReply::default()
+                .content("Sponsor sections are not configured.")
+                .ephemeral(true),
+        )
+        .await?;
+        return Ok(());
+    }
+
+    ctx.defer_ephemeral().await?;
+
+    ctx.send(
+        CreateReply::default()
+            .components(section_components(&data, ctx.author().id.get() as i64).await?)
             .flags(MessageFlags::IS_COMPONENTS_V2)
             .ephemeral(true),
     )

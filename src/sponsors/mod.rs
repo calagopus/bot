@@ -131,32 +131,19 @@ pub struct SponsorAccount {
     pub avatar_url: String,
 }
 
-/// One one-time payment, or one uninterrupted run of a recurring contribution.
-///
-/// The `*_in_cents` amounts are normalised to [`Ledger::currency`], the `native_*` ones
-/// are kept in the currency the contributor was charged in. Both are what the
-/// contributor paid: gross of the platform's own fees, and net of refunds the provider
-/// reports per contribution.
 #[derive(Debug, Clone)]
 pub struct Contribution {
     pub provider: Provider,
-    /// Stable across polls, stored as `sent_sponsorships.id`.
     pub id: String,
-    /// Groups contributions by contributor, even when the contributor is anonymous.
     pub key: String,
-    /// `None` when the contribution is private or incognito.
     pub account: Option<SponsorAccount>,
 
     pub recurring: bool,
-    /// `None` for one-time contributions.
     pub interval: Option<Interval>,
     pub start: chrono::DateTime<chrono::Utc>,
     pub end: Option<chrono::DateTime<chrono::Utc>>,
 
-    /// Headline figure: what is charged per [`Contribution::interval`], or the one-time payment.
     pub amount_in_cents: i64,
-    /// The recurring rate, zero for one-time contributions. Only counted towards a
-    /// contributor's monthly total while the run is active.
     pub monthly_in_cents: i64,
     pub paid_in_cents: i64,
     pub months_paid: u32,
@@ -174,11 +161,17 @@ impl Contribution {
 }
 
 /// A refund the provider reports against a contributor rather than a single contribution.
+///
+/// Normalised the same way a [`Contribution`] is: `amount_in_cents` in [`Ledger::currency`],
+/// `native_amount_in_cents` in the currency the contributor was charged in.
 #[derive(Debug, Clone)]
 pub struct Refund {
     pub key: String,
     pub recurring: bool,
     pub amount_in_cents: i64,
+
+    pub native_currency: String,
+    pub native_amount_in_cents: i64,
 }
 
 #[derive(Debug)]
@@ -186,7 +179,6 @@ pub struct ProviderLedger {
     pub provider: Provider,
     pub contributions: Vec<Contribution>,
     pub refunds: Vec<Refund>,
-    /// The provider's own monthly figure, used to sanity check the reconstruction.
     pub reported_monthly_in_cents: Option<i64>,
 }
 
@@ -228,8 +220,6 @@ pub fn is_configured(env: &crate::env::Env) -> bool {
         .any(|provider| provider.is_configured(env))
 }
 
-/// Collects every configured provider. A provider that fails is logged and skipped, so one
-/// broken integration cannot stall the other; the error only surfaces when none succeed.
 pub async fn collect(env: &crate::env::Env) -> Result<Ledger, anyhow::Error> {
     let mut providers = Vec::new();
     let mut failed_providers = Vec::new();

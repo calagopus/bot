@@ -1,3 +1,4 @@
+use indexmap::IndexMap;
 use sqlx::{FromRow, Row, sqlite::SqliteRow};
 
 #[derive(Debug, Clone)]
@@ -7,12 +8,9 @@ pub struct LinkedAccount {
     pub login: Option<String>,
     pub discord_user_id: Option<i64>,
 
-    /// High-water mark of what the ledger reported for this account, already credited to
-    /// whoever it was linked to at the time. Held per account so relinking moves the credit
-    /// with it instead of paying it out twice.
     pub lifetime_cents: i64,
-    /// How much of a drop below [`LinkedAccount::lifetime_cents`] moderators were told about.
-    pub refunded_cents: i64,
+    pub native_lifetime_cents: Option<IndexMap<String, i64>>,
+    pub native_refunded_cents: IndexMap<String, i64>,
 }
 
 impl LinkedAccount {
@@ -30,7 +28,21 @@ impl FromRow<'_, SqliteRow> for LinkedAccount {
             login: row.try_get("login")?,
             discord_user_id: row.try_get("discord_user_id")?,
             lifetime_cents: row.try_get("lifetime_cents")?,
-            refunded_cents: row.try_get("refunded_cents")?,
+            native_lifetime_cents: row
+                .try_get::<Option<String>, _>("native_lifetime_cents")?
+                .map(|marks| serde_json::from_str(&marks))
+                .transpose()
+                .map_err(|e| sqlx::Error::ColumnDecode {
+                    index: "native_lifetime_cents".into(),
+                    source: Box::new(e),
+                })?,
+            native_refunded_cents: serde_json::from_str(
+                &row.try_get::<String, _>("native_refunded_cents")?,
+            )
+            .map_err(|e| sqlx::Error::ColumnDecode {
+                index: "native_refunded_cents".into(),
+                source: Box::new(e),
+            })?,
         })
     }
 }
@@ -150,18 +162,18 @@ pub async fn unlink_discord_user(
     Ok(accounts)
 }
 
-/// Moves the account's high-water mark up to what the ledger now reports. The difference is
-/// what the member has gained to spend since the last poll.
 pub async fn credit_linked_account(
     pool: &sqlx::SqlitePool,
     provider: crate::sponsors::Provider,
     provider_id: &str,
-    lifetime_cents: i64,
+    gained_cents: i64,
+    native_lifetime_cents: &IndexMap<String, i64>,
 ) -> Result<(), anyhow::Error> {
     sqlx::query(
-        "UPDATE linked_accounts SET lifetime_cents = ? WHERE provider = ? AND provider_id = ?",
+        "UPDATE linked_accounts SET lifetime_cents = lifetime_cents + ?, native_lifetime_cents = ? WHERE provider = ? AND provider_id = ?",
     )
-    .bind(lifetime_cents)
+    .bind(gained_cents)
+    .bind(serde_json::to_string(native_lifetime_cents)?)
     .bind(provider.key())
     .bind(provider_id)
     .execute(pool)
@@ -174,12 +186,12 @@ pub async fn set_linked_account_refunded(
     pool: &sqlx::SqlitePool,
     provider: crate::sponsors::Provider,
     provider_id: &str,
-    refunded_cents: i64,
+    native_refunded_cents: &IndexMap<String, i64>,
 ) -> Result<(), anyhow::Error> {
     sqlx::query(
-        "UPDATE linked_accounts SET refunded_cents = ? WHERE provider = ? AND provider_id = ?",
+        "UPDATE linked_accounts SET native_refunded_cents = ? WHERE provider = ? AND provider_id = ?",
     )
-    .bind(refunded_cents)
+    .bind(serde_json::to_string(native_refunded_cents)?)
     .bind(provider.key())
     .bind(provider_id)
     .execute(pool)

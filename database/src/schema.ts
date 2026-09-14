@@ -45,7 +45,8 @@ export const linkedAccounts = sqliteTable('linked_accounts', {
 	discordUserId: integer('discord_user_id'),
 
 	lifetimeCents: integer('lifetime_cents').default(0).notNull(),
-	refundedCents: integer('refunded_cents').default(0).notNull(),
+	nativeLifetimeCents: text('native_lifetime_cents', { mode: 'json' }),
+	nativeRefundedCents: text('native_refunded_cents', { mode: 'json' }).default({}).notNull(),
 
 	created: integer('created', { mode: 'timestamp' }).default(sql`(strftime('%s','now'))`).notNull(),
 }, (linkedAccounts) => [

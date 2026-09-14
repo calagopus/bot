@@ -1,4 +1,5 @@
 use super::{Evaluation, Ledger, amount};
+use indexmap::IndexMap;
 use serenity::all::{
     ButtonStyle, CreateActionRow, CreateButton, CreateComponent, CreateEmbed,
     CreateInteractionResponse, CreateInteractionResponseMessage, CreateMessage, GenericChannelId,
@@ -336,6 +337,23 @@ pub async fn close_request(
     Ok(())
 }
 
+async fn seed_marks(
+    env: &crate::env::Env,
+    credited_cents: i64,
+    native_lifetime_cents: &IndexMap<String, i64>,
+) -> Result<IndexMap<String, i64>, anyhow::Error> {
+    let mut marks = IndexMap::new();
+
+    for (currency, cents) in native_lifetime_cents {
+        let credited =
+            super::convert(env, credited_cents, &env.sponsors_currency, currency).await?;
+
+        marks.insert(currency.clone(), credited.min(*cents));
+    }
+
+    Ok(marks)
+}
+
 async fn sync_balances(
     state: &crate::routes::State,
     ledger: &Ledger,
@@ -353,24 +371,50 @@ async fn sync_balances(
             continue;
         }
 
-        let lifetime_cents = evaluation
+        let native_lifetime_cents = evaluation
             .sponsor(provider, &account.provider_id)
-            .map(|sponsor| sponsor.lifetime_in_cents)
-            .unwrap_or(0);
+            .map(|sponsor| sponsor.native_lifetime_in_cents.clone())
+            .unwrap_or_default();
 
-        if lifetime_cents > account.lifetime_cents {
-            let gained = lifetime_cents - account.lifetime_cents;
+        let mut marks = match &account.native_lifetime_cents {
+            Some(marks) => marks.clone(),
+            None => seed_marks(&state.env, account.lifetime_cents, &native_lifetime_cents).await?,
+        };
 
+        let mut gained = 0;
+        for (currency, cents) in &native_lifetime_cents {
+            let credited = marks.get(currency).copied().unwrap_or(0);
+            if *cents <= credited {
+                continue;
+            }
+
+            gained += super::convert(
+                &state.env,
+                cents - credited,
+                currency,
+                &state.env.sponsors_currency,
+            )
+            .await?;
+            marks.insert(currency.clone(), *cents);
+        }
+
+        if gained > 0 {
             crate::models::add_available_cents(state.database.write(), discord_user_id, gained)
                 .await?;
+        }
+
+        if gained > 0 || account.native_lifetime_cents.as_ref() != Some(&marks) {
             crate::models::credit_linked_account(
                 state.database.write(),
                 provider,
                 &account.provider_id,
-                lifetime_cents,
+                gained,
+                &marks,
             )
             .await?;
+        }
 
+        if gained > 0 {
             tracing::info!(
                 "credited {} to {} for {} account {}",
                 amount(gained, &state.env.sponsors_currency),
@@ -378,33 +422,62 @@ async fn sync_balances(
                 provider.key(),
                 account.provider_id
             );
-
-            continue;
         }
 
-        let refunded = account.lifetime_cents - lifetime_cents;
-        if refunded > account.refunded_cents {
+        let mut refunded: IndexMap<String, i64> = IndexMap::new();
+        for (currency, cents) in &marks {
+            let reported = native_lifetime_cents.get(currency).copied().unwrap_or(0);
+
+            if reported < *cents {
+                refunded.insert(currency.clone(), cents - reported);
+            }
+        }
+
+        let announced = |currency: &String| {
+            account
+                .native_refunded_cents
+                .get(currency)
+                .copied()
+                .unwrap_or(0)
+        };
+        let watermarks: IndexMap<String, i64> = refunded
+            .iter()
+            .map(|(currency, cents)| (currency.clone(), (*cents).max(announced(currency))))
+            .collect();
+
+        if watermarks != account.native_refunded_cents {
             crate::models::set_linked_account_refunded(
                 state.database.write(),
                 provider,
                 &account.provider_id,
-                refunded,
-            )
-            .await?;
-
-            alert(
-                state,
-                "Sponsor was refunded",
-                format!(
-                    "<@{}> ({} `{}`) is now `{}` below what they were credited. Funds already handed out were left alone.",
-                    discord_user_id,
-                    provider.label(),
-                    account.login.as_deref().unwrap_or(&account.provider_id),
-                    amount(refunded, &state.env.sponsors_currency)
-                ),
+                &watermarks,
             )
             .await?;
         }
+
+        if !refunded
+            .iter()
+            .any(|(currency, cents)| *cents > announced(currency))
+        {
+            continue;
+        }
+
+        alert(
+            state,
+            "Sponsor was refunded",
+            format!(
+                "<@{}> ({} `{}`) is now {} below what they were credited. Funds already handed out were left alone.",
+                discord_user_id,
+                provider.label(),
+                account.login.as_deref().unwrap_or(&account.provider_id),
+                refunded
+                    .iter()
+                    .map(|(currency, cents)| format!("`{}`", amount(*cents, currency)))
+                    .collect::<Vec<_>>()
+                    .join(" and ")
+            ),
+        )
+        .await?;
     }
 
     Ok(())

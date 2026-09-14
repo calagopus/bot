@@ -16,6 +16,8 @@ pub struct EvaluatedSponsor {
     pub one_time_in_cents: i64,
     pub recurring_in_cents: i64,
     pub lifetime_in_cents: i64,
+
+    pub native_lifetime_in_cents: IndexMap<String, i64>,
     pub estimated_months_paid: u32,
 
     pub first_sponsored_at: chrono::DateTime<chrono::Utc>,
@@ -107,9 +109,8 @@ pub fn evaluate(ledger: &Ledger) -> Evaluation {
                 continue;
             };
 
-            // Refunds are reported against the contributor rather than a single
-            // contribution, so they come off the newest matching one first.
             let mut remaining = refund.amount_in_cents;
+            let mut native_remaining = refund.native_amount_in_cents;
 
             for contribution in state
                 .contributions
@@ -117,13 +118,19 @@ pub fn evaluate(ledger: &Ledger) -> Evaluation {
                 .rev()
                 .filter(|contribution| contribution.recurring == refund.recurring)
             {
-                if remaining <= 0 {
+                if remaining <= 0 && native_remaining <= 0 {
                     break;
                 }
 
                 let taken = remaining.min(contribution.paid_in_cents);
                 contribution.paid_in_cents -= taken;
                 remaining -= taken;
+
+                if contribution.native_currency == refund.native_currency {
+                    let taken = native_remaining.min(contribution.native_paid_in_cents);
+                    contribution.native_paid_in_cents -= taken;
+                    native_remaining -= taken;
+                }
             }
         }
     }
@@ -145,6 +152,7 @@ pub fn evaluate(ledger: &Ledger) -> Evaluation {
             .max()
             .unwrap_or(first_sponsored_at);
 
+        let mut native_lifetime_in_cents: IndexMap<String, i64> = IndexMap::new();
         let mut one_time_in_cents = 0;
         let mut recurring_in_cents = 0;
         let mut monthly_in_cents = 0;
@@ -153,6 +161,10 @@ pub fn evaluate(ledger: &Ledger) -> Evaluation {
         let mut active = false;
 
         for contribution in &state.contributions {
+            *native_lifetime_in_cents
+                .entry(contribution.native_currency.clone())
+                .or_default() += contribution.native_paid_in_cents;
+
             if contribution.recurring {
                 recurring_spells += 1;
                 recurring_in_cents += contribution.paid_in_cents;
@@ -168,6 +180,7 @@ pub fn evaluate(ledger: &Ledger) -> Evaluation {
         }
 
         let lifetime_in_cents = one_time_in_cents + recurring_in_cents;
+        native_lifetime_in_cents.retain(|_, cents| *cents > 0);
 
         evaluation.monthly_recurring_in_cents += monthly_in_cents;
         evaluation.one_time_in_cents += one_time_in_cents;
@@ -196,6 +209,7 @@ pub fn evaluate(ledger: &Ledger) -> Evaluation {
             one_time_in_cents,
             recurring_in_cents,
             lifetime_in_cents,
+            native_lifetime_in_cents,
             estimated_months_paid,
 
             first_sponsored_at,
@@ -233,4 +247,129 @@ pub fn evaluate(ledger: &Ledger) -> Evaluation {
         .sort_by_key(|contribution| contribution.start);
 
     evaluation
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::sponsors::{ProviderLedger, Refund};
+
+    fn contribution(
+        id: &str,
+        paid_in_cents: i64,
+        native_currency: &str,
+        native_paid_in_cents: i64,
+    ) -> Contribution {
+        Contribution {
+            provider: Provider::OpenCollective,
+            id: id.to_string(),
+            key: "contributor".to_string(),
+            account: None,
+
+            recurring: false,
+            interval: None,
+            start: chrono::Utc::now(),
+            end: Some(chrono::Utc::now()),
+
+            amount_in_cents: paid_in_cents,
+            monthly_in_cents: 0,
+            paid_in_cents,
+            months_paid: 1,
+
+            native_currency: native_currency.to_string(),
+            native_amount_in_cents: native_paid_in_cents,
+            native_paid_in_cents,
+        }
+    }
+
+    fn ledger(contributions: Vec<Contribution>, refunds: Vec<Refund>) -> Ledger {
+        Ledger {
+            currency: "USD".to_string(),
+            providers: vec![ProviderLedger {
+                provider: Provider::OpenCollective,
+                contributions,
+                refunds,
+                reported_monthly_in_cents: None,
+            }],
+            failed_providers: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn a_rate_that_moved_between_polls_leaves_the_native_total_alone() {
+        // The same €10.00, converted at 1.160 and then at 1.15319.
+        let before = evaluate(&ledger(
+            vec![contribution("order", 1160, "EUR", 1000)],
+            vec![],
+        ));
+        let after = evaluate(&ledger(
+            vec![contribution("order", 1153, "EUR", 1000)],
+            vec![],
+        ));
+
+        assert_ne!(before.lifetime_in_cents, after.lifetime_in_cents);
+        assert_eq!(
+            before.sponsors[0].native_lifetime_in_cents,
+            after.sponsors[0].native_lifetime_in_cents
+        );
+        assert_eq!(after.sponsors[0].native_lifetime_in_cents["EUR"], 1000);
+    }
+
+    #[test]
+    fn each_currency_a_contributor_was_charged_in_is_counted_on_its_own() {
+        let evaluation = evaluate(&ledger(
+            vec![
+                contribution("euros", 1160, "EUR", 1000),
+                contribution("dollars", 500, "USD", 500),
+            ],
+            vec![],
+        ));
+
+        let native = &evaluation.sponsors[0].native_lifetime_in_cents;
+
+        assert_eq!(evaluation.lifetime_in_cents, 1660);
+        assert_eq!(native["EUR"], 1000);
+        assert_eq!(native["USD"], 500);
+    }
+
+    #[test]
+    fn a_refund_comes_off_the_native_total_as_well_as_the_normalised_one() {
+        let evaluation = evaluate(&ledger(
+            vec![contribution("order", 1160, "EUR", 1000)],
+            vec![Refund {
+                key: "contributor".to_string(),
+                recurring: false,
+                amount_in_cents: 464,
+
+                native_currency: "EUR".to_string(),
+                native_amount_in_cents: 400,
+            }],
+        ));
+
+        assert_eq!(evaluation.lifetime_in_cents, 696);
+        assert_eq!(evaluation.sponsors[0].native_lifetime_in_cents["EUR"], 600);
+    }
+
+    #[test]
+    fn a_refund_only_touches_the_currency_it_was_charged_in() {
+        let evaluation = evaluate(&ledger(
+            vec![
+                contribution("euros", 1160, "EUR", 1000),
+                contribution("dollars", 500, "USD", 500),
+            ],
+            vec![Refund {
+                key: "contributor".to_string(),
+                recurring: false,
+                amount_in_cents: 500,
+
+                native_currency: "USD".to_string(),
+                native_amount_in_cents: 500,
+            }],
+        ));
+
+        let native = &evaluation.sponsors[0].native_lifetime_in_cents;
+
+        assert_eq!(native["EUR"], 1000);
+        assert!(!native.contains_key("USD"));
+    }
 }

@@ -248,9 +248,6 @@ impl Spell {
         self.segments.last().map(|(_, cents)| *cents).unwrap_or(0)
     }
 
-    /// GitHub does not report how many times a sponsorship was charged, so the total is
-    /// rebuilt by walking one charge per month from the start at whatever tier was
-    /// current on that date.
     fn evaluate(&self, now: chrono::DateTime<chrono::Utc>) -> (i64, u32) {
         let end = self.end.unwrap_or(now);
 
@@ -430,6 +427,9 @@ fn build(
                     key: key.clone(),
                     recurring,
                     amount_in_cents,
+
+                    native_currency: CURRENCY.to_string(),
+                    native_amount_in_cents: amount_in_cents,
                 });
             }
         }

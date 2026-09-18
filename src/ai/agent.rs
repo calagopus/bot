@@ -1,50 +1,95 @@
 use super::{
     answer::{Answer, Retrieved},
-    openrouter::{Message, Part, Request, Role, Tool, ToolChoice},
-    prompt::{SKIP, SUBMIT_ANSWER, TRIAGE_PROMPT, skip_tool, submit_answer_tool, system_prompt},
+    decisions::{Criteria, Question},
+    openrouter::{Message, Part, Request, Role, Tool},
+    prompt::{
+        DRAFT_FALSE, DRAFT_INSTRUCTIONS, DRAFT_QUESTION, DRAFT_TRUE, SKIP, SUBMIT_ANSWER,
+        TRIAGE_FALSE, TRIAGE_INSTRUCTIONS, TRIAGE_QUESTION, TRIAGE_TRUE, skip_tool,
+        submit_answer_tool, system_prompt,
+    },
     transcript::Context,
 };
 
-const TRIAGE_TOKENS: u32 = 512;
+const TRIAGE_THRESHOLD: f64 = 0.3;
+const DRAFT_THRESHOLD: f64 = 0.25;
 const MAX_STEPS: usize = 10;
 const MAX_DOCS_IMAGES: usize = 4;
 const ANSWER_TOKENS: u32 = 4096;
 
-pub async fn needs_reply(env: &crate::env::Env, transcript: &str) -> Result<bool, anyhow::Error> {
-    let messages = [
-        Message::new(Role::System, TRIAGE_PROMPT),
-        Message::new(Role::User, transcript),
-    ];
-
-    let reply = super::openrouter::complete(
+pub async fn needs_reply(env: &crate::env::Env, transcript: &str) -> bool {
+    let decision = super::decisions::ask(
         env,
-        Request {
-            model: &env.ai_support_triage_model,
-            messages: &messages,
-            tools: &[],
-            tool_choice: None,
-            max_tokens: Some(TRIAGE_TOKENS),
-            temperature: Some(0.0),
+        &env.ai_support_triage_model,
+        transcript,
+        TRIAGE_QUESTION,
+        Question::Noul {
+            instructions: TRIAGE_INSTRUCTIONS,
+            criteria: Criteria {
+                yes: TRIAGE_TRUE,
+                no: TRIAGE_FALSE,
+            },
         },
     )
-    .await?;
+    .await;
 
-    let decision = reply.text().to_uppercase();
+    let decision = match decision {
+        Ok(decision) => decision,
+        Err(err) => {
+            tracing::warn!(
+                model = %env.ai_support_triage_model,
+                "ai support triage failed, answering anyway: {err:?}"
+            );
+            sentry_anyhow::capture_anyhow(&err);
 
-    tracing::debug!(decision = %decision.trim(), "ai support triage");
+            return true;
+        }
+    };
 
-    if decision.contains("SKIP") && !decision.contains("REPLY") {
-        return Ok(false);
-    }
+    tracing::debug!(
+        score = decision.score,
+        cost = decision.cost,
+        "ai support triage"
+    );
 
-    if !decision.contains("REPLY") {
-        tracing::warn!(
-            model = %env.ai_support_triage_model,
-            "ai support triage answered with neither word, answering anyway"
-        );
-    }
+    decision.score >= TRIAGE_THRESHOLD
+}
 
-    Ok(true)
+pub async fn worth_posting(env: &crate::env::Env, transcript: &str, draft: &str) -> bool {
+    let decision = super::decisions::ask(
+        env,
+        &env.ai_support_triage_model,
+        &format!("{transcript}DRAFT:\n{draft}"),
+        DRAFT_QUESTION,
+        Question::Noul {
+            instructions: DRAFT_INSTRUCTIONS,
+            criteria: Criteria {
+                yes: DRAFT_TRUE,
+                no: DRAFT_FALSE,
+            },
+        },
+    )
+    .await;
+
+    let decision = match decision {
+        Ok(decision) => decision,
+        Err(err) => {
+            tracing::warn!(
+                model = %env.ai_support_triage_model,
+                "ai support draft check failed, posting anyway: {err:?}"
+            );
+            sentry_anyhow::capture_anyhow(&err);
+
+            return true;
+        }
+    };
+
+    tracing::debug!(
+        score = decision.score,
+        cost = decision.cost,
+        "ai support draft check"
+    );
+
+    decision.score >= DRAFT_THRESHOLD
 }
 
 pub enum Outcome {
@@ -89,6 +134,8 @@ pub async fn generate(env: &crate::env::Env, context: &Context) -> Result<Outcom
     tools.push(submit_answer_tool());
     tools.push(skip_tool());
 
+    let finishing = [submit_answer_tool(), skip_tool()];
+
     let mut messages = vec![
         Message::new(Role::System, system_prompt(super::docs_url(env))),
         opening_message(context),
@@ -104,12 +151,8 @@ pub async fn generate(env: &crate::env::Env, context: &Context) -> Result<Outcom
             Request {
                 model: &env.ai_support_model,
                 messages: &messages,
-                tools: &tools,
-                tool_choice: Some(if last_step {
-                    ToolChoice::required(SUBMIT_ANSWER)
-                } else {
-                    ToolChoice::Mode("auto")
-                }),
+                tools: if last_step { &finishing } else { &tools },
+                tool_choice: Some(if last_step { "required" } else { "auto" }),
                 max_tokens: Some(ANSWER_TOKENS),
                 temperature: Some(0.2),
             },
@@ -122,7 +165,7 @@ pub async fn generate(env: &crate::env::Env, context: &Context) -> Result<Outcom
             messages.push(reply);
             messages.push(Message::new(
                 Role::User,
-                format!("Call {SUBMIT_ANSWER} with your answer, or {SKIP} if the thread needs no answer from you."),
+                format!("Call {SUBMIT_ANSWER} with your answer, or {SKIP} if the thread needs no answer from you or you cannot answer it."),
             ));
 
             continue;

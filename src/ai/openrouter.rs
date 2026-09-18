@@ -102,21 +102,6 @@ impl Message {
             tool_call_id: Some(tool_call_id.into()),
         }
     }
-
-    pub fn text(&self) -> String {
-        match &self.content {
-            Some(Content::Text(text)) => text.clone(),
-            Some(Content::Parts(parts)) => parts
-                .iter()
-                .filter_map(|part| match part {
-                    Part::Text { text } => Some(text.as_str()),
-                    Part::ImageUrl { .. } => None,
-                })
-                .collect::<Vec<_>>()
-                .join("\n"),
-            None => String::new(),
-        }
-    }
 }
 
 #[derive(Serialize, Debug, Clone)]
@@ -152,32 +137,6 @@ impl<'a> Tool<'a> {
     }
 }
 
-#[derive(Serialize, Debug, Clone)]
-#[serde(untagged)]
-pub enum ToolChoice<'a> {
-    Mode(&'static str),
-    Function {
-        #[serde(rename = "type")]
-        kind: &'static str,
-        function: ToolChoiceFunction<'a>,
-    },
-}
-
-#[derive(Serialize, Debug, Clone)]
-pub struct ToolChoiceFunction<'a> {
-    pub name: &'a str,
-}
-
-impl<'a> ToolChoice<'a> {
-    #[inline]
-    pub fn required(name: &'a str) -> Self {
-        Self::Function {
-            kind: "function",
-            function: ToolChoiceFunction { name },
-        }
-    }
-}
-
 #[derive(Serialize, Debug)]
 pub struct Request<'a> {
     pub model: &'a str,
@@ -185,7 +144,7 @@ pub struct Request<'a> {
     #[serde(skip_serializing_if = "<[_]>::is_empty")]
     pub tools: &'a [Tool<'a>],
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub tool_choice: Option<ToolChoice<'a>>,
+    pub tool_choice: Option<&'static str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_tokens: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -209,30 +168,7 @@ pub async fn complete(
     env: &crate::env::Env,
     request: Request<'_>,
 ) -> Result<Message, anyhow::Error> {
-    let api_key = env
-        .openrouter_api_key
-        .as_deref()
-        .ok_or_else(|| anyhow::anyhow!("OPENROUTER_API_KEY is not set"))?;
-
-    let response = super::CLIENT
-        .post(API_URL)
-        .bearer_auth(api_key)
-        .header("HTTP-Referer", &env.app_url)
-        .header("X-Title", "Calagopus Bot")
-        .json(&request)
-        .send()
-        .await?;
-
-    let status = response.status();
-    let body = response.text().await?;
-
-    if !status.is_success() {
-        return Err(anyhow::anyhow!(
-            "openrouter request failed with status {status}: {}",
-            body.chars().take(512).collect::<String>()
-        ));
-    }
-
+    let body = super::post(env, API_URL, &request).await?;
     let response: Response = serde_json::from_str(&body)?;
 
     if let Some(error) = response.error {

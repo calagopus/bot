@@ -153,7 +153,7 @@ async fn answer(
     )
     .await;
 
-    if triage && !super::agent::needs_reply(&state.env, &context.text).await? {
+    if triage && !super::agent::needs_reply(&state.env, &context.text).await {
         tracing::debug!(thread = %thread.id, "ai support triage skipped a message");
 
         return Ok(());
@@ -196,6 +196,18 @@ async fn answer(
         escalate(state, &http, channel_id).await?;
 
         return super::support::pause(state, thread.id.get() as i64).await;
+    }
+
+    if triage && !super::agent::worth_posting(&state.env, &context.text, &answer.text).await {
+        discard(&http, loading).await;
+
+        return super::support::hand_over(
+            state,
+            &http,
+            thread.id.get() as i64,
+            "the draft held nothing the thread did not already have",
+        )
+        .await;
     }
 
     tracing::info!(

@@ -2,6 +2,7 @@ use std::sync::{LazyLock, OnceLock};
 
 mod agent;
 mod answer;
+mod decisions;
 mod guard;
 mod mcp;
 mod openrouter;
@@ -22,6 +23,38 @@ static CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
         .build()
         .expect("failed to build ai http client")
 });
+
+async fn post(
+    env: &crate::env::Env,
+    url: &str,
+    body: &impl serde::Serialize,
+) -> Result<String, anyhow::Error> {
+    let api_key = env
+        .openrouter_api_key
+        .as_deref()
+        .ok_or_else(|| anyhow::anyhow!("OPENROUTER_API_KEY is not set"))?;
+
+    let response = CLIENT
+        .post(url)
+        .bearer_auth(api_key)
+        .header("HTTP-Referer", &env.app_url)
+        .header("X-Title", "Calagopus Bot")
+        .json(body)
+        .send()
+        .await?;
+
+    let status = response.status();
+    let body = response.text().await?;
+
+    if !status.is_success() {
+        return Err(anyhow::anyhow!(
+            "openrouter request failed with status {status}: {}",
+            body.chars().take(512).collect::<String>()
+        ));
+    }
+
+    Ok(body)
+}
 
 static MCP_CLIENT: OnceLock<mcp::Client> = OnceLock::new();
 

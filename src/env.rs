@@ -237,7 +237,7 @@ impl Env {
                 .ok()
                 .map(|s| s.trim_matches('"').to_string())
                 .filter(|s| !s.is_empty())
-                .unwrap_or("z-ai/glm-5.3-flash".to_string()),
+                .unwrap_or("~typesafe/jev-latest".to_string()),
             ai_support_mcp_url: std::env::var("AI_SUPPORT_MCP_URL")
                 .ok()
                 .map(|s| s.trim_matches('"').to_string())

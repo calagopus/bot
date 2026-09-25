@@ -562,7 +562,8 @@ async fn handle_repository_event(
                 &*state.bot.read().await,
                 serenity::all::EditMessage::new()
                     .components(&[component])
-                    .flags(MessageFlags::IS_COMPONENTS_V2),
+                    .flags(MessageFlags::IS_COMPONENTS_V2)
+                    .allowed_mentions(serenity::all::CreateAllowedMentions::new()),
             )
             .await?;
 
@@ -583,7 +584,8 @@ async fn handle_repository_event(
                 &*state.bot.read().await,
                 CreateMessage::new()
                     .components(&[component])
-                    .flags(MessageFlags::IS_COMPONENTS_V2),
+                    .flags(MessageFlags::IS_COMPONENTS_V2)
+                    .allowed_mentions(serenity::all::CreateAllowedMentions::new()),
             )
             .await?;
 
@@ -708,7 +710,8 @@ async fn handle_organization_event(
                 &*state.bot.read().await,
                 CreateMessage::new()
                     .components(&[component])
-                    .flags(MessageFlags::IS_COMPONENTS_V2),
+                    .flags(MessageFlags::IS_COMPONENTS_V2)
+                    .allowed_mentions(serenity::all::CreateAllowedMentions::new()),
             )
             .await?;
     }

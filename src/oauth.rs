@@ -51,7 +51,7 @@ struct OpenCollectiveResponse<T> {
     errors: Option<Vec<serde_json::Value>>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct OauthUser {
     /// `(provider id, login)` pairs, all linked together.
     pub accounts: Vec<(String, String)>,
@@ -148,6 +148,38 @@ pub async fn take_link_state(provider: Provider, state: &str) -> Option<LinkRequ
         .remove(state)
         .await
         .filter(|request| request.provider == provider)
+}
+
+#[derive(Debug, Clone)]
+pub struct PendingLink {
+    pub request: LinkRequest,
+    pub user: OauthUser,
+}
+
+static PENDING_LINKS: LazyLock<moka::future::Cache<String, PendingLink>> = LazyLock::new(|| {
+    moka::future::Cache::builder()
+        .time_to_live(std::time::Duration::from_mins(5))
+        .max_capacity(1024)
+        .build()
+});
+
+pub async fn create_pending_link(request: LinkRequest, user: OauthUser) -> String {
+    let mut bytes = [0u8; 32];
+    rand::fill(&mut bytes);
+
+    let token = hex::encode(bytes);
+    PENDING_LINKS
+        .insert(token.clone(), PendingLink { request, user })
+        .await;
+
+    token
+}
+
+pub async fn take_pending_link(provider: Provider, token: &str) -> Option<PendingLink> {
+    PENDING_LINKS
+        .remove(token)
+        .await
+        .filter(|pending| pending.request.provider == provider)
 }
 
 pub fn authorize_url(

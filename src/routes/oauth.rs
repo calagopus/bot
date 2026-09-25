@@ -8,9 +8,9 @@ use axum::http::StatusCode;
 use serde::Deserialize;
 use serenity::all::{
     CreateComponent, CreateContainer, CreateContainerComponent, CreateInteractionResponseFollowup,
-    CreateTextDisplay, EditInteractionResponse, MessageFlags,
+    CreateTextDisplay, EditInteractionResponse, MessageFlags, UserId,
 };
-use utoipa::IntoParams;
+use utoipa::{IntoParams, ToSchema};
 
 /// Refreshes the `/sponsor link` message this started from and confirms below it. The
 /// token only lives in memory, so after a restart the web page is the only confirmation.
@@ -63,6 +63,25 @@ async fn report_back(
 }
 
 fn page(heading: &str, message: &str) -> String {
+    document(heading, &format!("<p>{message}</p>"))
+}
+
+fn confirm_page(
+    heading: &str,
+    message: &str,
+    confirmation: &str,
+    action: &str,
+    token: &str,
+) -> String {
+    document(
+        heading,
+        &format!(
+            r#"<p>{message}</p><form method="post" action="{action}"><input type="hidden" name="token" value="{token}"><label><input type="checkbox" required> {confirmation}</label><button type="submit">Link accounts</button></form>"#
+        ),
+    )
+}
+
+fn document(heading: &str, body: &str) -> String {
     format!(
         r#"<!DOCTYPE html>
 <html lang="en">
@@ -76,11 +95,22 @@ body {{ margin: 0; min-height: 100vh; display: grid; place-items: center; font-f
 main {{ max-width: 32rem; padding: 2rem; text-align: center; }}
 h1 {{ font-size: 1.25rem; margin: 0 0 0.5rem; }}
 p {{ margin: 0; opacity: 0.75; }}
+form {{ display: grid; gap: 1rem; justify-items: center; margin-top: 1.5rem; }}
+button {{ font: inherit; padding: 0.5rem 1.25rem; cursor: pointer; }}
 </style>
 </head>
-<body><main><h1>{heading}</h1><p>{message}</p></main></body>
+<body><main><h1>{heading}</h1>{body}</main></body>
 </html>"#
     )
+}
+
+fn escape(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#39;")
 }
 
 #[derive(Deserialize, IntoParams)]
@@ -88,6 +118,11 @@ pub struct Params {
     pub code: Option<String>,
     pub state: Option<String>,
     pub error: Option<String>,
+}
+
+#[derive(Deserialize, ToSchema)]
+pub struct ConfirmParams {
+    pub token: Option<String>,
 }
 
 pub async fn callback(state: &State, provider: Provider, params: Params) -> ApiResponseResult {
@@ -130,8 +165,72 @@ pub async fn callback(state: &State, provider: Provider, params: Params) -> ApiR
         .ok();
     };
 
-    let discord_user_id = request.discord_user_id;
     let user = oauth::exchange_code(&state.env, provider, &code).await?;
+
+    let http = state.bot.read().await.clone();
+    let discord_user = http.get_user(UserId::new(request.discord_user_id)).await?;
+
+    let logins = user
+        .accounts
+        .iter()
+        .map(|(_, login)| format!("<strong>{}</strong>", escape(login)))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let discord_tag = format!("<strong>@{}</strong>", escape(&discord_user.tag()));
+
+    let token = oauth::create_pending_link(request, user).await;
+
+    let mut response = ApiResponse::html(confirm_page(
+        &format!("Link your {} account", provider.label()),
+        &format!(
+            "This links {} {logins} to the Discord account {discord_tag}. Any other Discord account it is linked to loses the link.",
+            provider.label()
+        ),
+        &format!("{discord_tag} is my Discord account"),
+        &escape(&format!(
+            "{}/api/{}/oauth/confirm",
+            state.env.app_url.trim_end_matches('/'),
+            provider.key()
+        )),
+        &token,
+    ));
+    response.headers.insert(
+        axum::http::header::X_FRAME_OPTIONS,
+        axum::http::HeaderValue::from_static("DENY"),
+    );
+
+    response.ok()
+}
+
+pub async fn confirm(
+    state: &State,
+    provider: Provider,
+    params: ConfirmParams,
+) -> ApiResponseResult {
+    if !oauth::is_configured(&state.env, provider) {
+        return ApiResponse::error("account linking is not configured")
+            .with_status(StatusCode::SERVICE_UNAVAILABLE)
+            .ok();
+    }
+
+    let Some(token) = params.token else {
+        return ApiResponse::error("missing token parameter")
+            .with_status(StatusCode::BAD_REQUEST)
+            .ok();
+    };
+
+    let Some(oauth::PendingLink { request, user }) =
+        oauth::take_pending_link(provider, &token).await
+    else {
+        return ApiResponse::html(page(
+            "Link request expired",
+            "This link request is no longer valid. Run `/sponsor link` again to get a new one.",
+        ))
+        .with_status(StatusCode::BAD_REQUEST)
+        .ok();
+    };
+
+    let discord_user_id = request.discord_user_id;
 
     let displaced_user_ids = crate::models::link_accounts(
         state.database.write(),

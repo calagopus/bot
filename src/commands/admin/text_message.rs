@@ -211,6 +211,17 @@ pub async fn admin_text_message_sync_command(
         return Ok(());
     };
 
+    let (channel, _) = text_message.get_message(ctx.http()).await?;
+    if Some(channel.base.guild_id) != ctx.guild_id() {
+        ctx.send(
+            CreateReply::default()
+                .content("Text message not found.")
+                .ephemeral(true),
+        )
+        .await?;
+        return Ok(());
+    }
+
     let message = text_message
         .send_or_update(&ctx.serenity_context().http, &ctx.data().database)
         .await?;
@@ -248,7 +259,18 @@ pub async fn admin_text_message_recreate_command(
         return Ok(());
     };
 
-    if let (_, Some(message)) = text_message.get_message(ctx.http()).await? {
+    let (channel, message) = text_message.get_message(ctx.http()).await?;
+    if Some(channel.base.guild_id) != ctx.guild_id() {
+        ctx.send(
+            CreateReply::default()
+                .content("Text message not found.")
+                .ephemeral(true),
+        )
+        .await?;
+        return Ok(());
+    }
+
+    if let Some(message) = message {
         message.delete(ctx.http(), None).await?;
         text_message.message_id = None;
     }
@@ -290,7 +312,18 @@ pub async fn admin_text_message_delete_command(
         return Ok(());
     };
 
-    if let (_, Some(message)) = text_message.get_message(ctx.http()).await? {
+    let (channel, message) = text_message.get_message(ctx.http()).await?;
+    if Some(channel.base.guild_id) != ctx.guild_id() {
+        ctx.send(
+            CreateReply::default()
+                .content("Text message not found.")
+                .ephemeral(true),
+        )
+        .await?;
+        return Ok(());
+    }
+
+    if let Some(message) = message {
         message.delete(ctx.http(), None).await?;
     }
 

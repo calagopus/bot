@@ -23,7 +23,6 @@ sqlx = { version = "0.9", features = ["runtime-tokio", "tls-rustls-ring-webpki",
 chrono = { version = "0.4.40", features = ["serde"] }
 tower-http = { version = "0.7.0", features = ["catch-panic", "cors", "normalize-path"] }
 tower = "0.5.2"
-tikv-jemallocator = "0.6.0"
 anyhow = "1.0.98"
 serenity = { git = "https://github.com/serenity-rs/serenity.git", branch = "next" }
 poise = { git = "https://github.com/meditationmind/poise.git", branch = "modal-derive-components" }

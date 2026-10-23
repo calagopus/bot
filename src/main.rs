@@ -12,7 +12,6 @@ use colored::Colorize;
 use sentry_tower::{NewSentryLayer, SentryHttpLayer};
 use serenity::all::{GatewayIntents, Token};
 use std::{net::SocketAddr, str::FromStr, sync::Arc, time::Instant};
-use tikv_jemallocator::Jemalloc;
 use tokio::sync::RwLock;
 use tower::Layer;
 use tower_http::{cors::CorsLayer, normalize_path::NormalizePathLayer};
@@ -34,9 +33,6 @@ mod sponsors;
 mod storage;
 mod tiers;
 mod utils;
-
-#[global_allocator]
-static ALLOC: Jemalloc = Jemalloc;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 const GIT_COMMIT: &str = env!("CARGO_GIT_COMMIT");

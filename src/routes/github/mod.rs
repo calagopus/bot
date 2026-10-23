@@ -379,7 +379,6 @@ async fn handle_repository_event(
             #[derive(Deserialize)]
             struct WorkflowJobData {
                 id: i64,
-                run_id: i64,
                 name: String,
                 head_sha: String,
                 status: octocrab::models::workflows::Status,
@@ -397,6 +396,9 @@ async fn handle_repository_event(
             .fetch_one(state.database.read())
             .await?;
 
+            let is_new = !github_message
+                .workflow_status
+                .contains_key(&workflow_job_data.id);
             let entry = github_message
                 .workflow_status
                 .entry(workflow_job_data.id)
@@ -432,15 +434,12 @@ async fn handle_repository_event(
                     _ => workflow_job_data.status,
                 }
             };
+            if !is_new && entry.status == status {
+                return Ok(());
+            }
             entry.status = status;
 
-            sqlx::query("UPDATE github_messages SET workflow_status = ? WHERE id = ?")
-                .bind(serde_json::to_string(&github_message.workflow_status)?)
-                .bind(github_message.id)
-                .execute(state.database.write())
-                .await?;
-
-            edit_github_message = Some((github_message, workflow_job_data.run_id));
+            edit_github_message = Some(github_message);
         }
         _ => {
             return Ok(());
@@ -461,7 +460,7 @@ async fn handle_repository_event(
         ));
     };
 
-    if let Some((edit_github_message, run_id)) = edit_github_message {
+    if let Some(edit_github_message) = edit_github_message {
         let mut commit_string = String::new();
 
         for commit in edit_github_message.commits.iter().take(8) {
@@ -526,14 +525,13 @@ async fn handle_repository_event(
             ],
             CreateSectionAccessory::Button(
                 CreateButton::new_link(format!(
-                    "{}/actions/runs/{}",
+                    "{}/actions",
                     repository
                         .html_url
                         .as_ref()
-                        .map_or_else(|| "".to_string(), |h| h.to_string()),
-                    run_id
+                        .map_or_else(|| "".to_string(), |h| h.to_string())
                 ))
-                .label("View Action"),
+                .label("View Actions"),
             ),
         )));
 
@@ -565,6 +563,12 @@ async fn handle_repository_event(
                     .flags(MessageFlags::IS_COMPONENTS_V2)
                     .allowed_mentions(serenity::all::CreateAllowedMentions::new()),
             )
+            .await?;
+
+        sqlx::query("UPDATE github_messages SET workflow_status = ? WHERE id = ?")
+            .bind(serde_json::to_string(&edit_github_message.workflow_status)?)
+            .bind(edit_github_message.id)
+            .execute(state.database.write())
             .await?;
 
         return Ok(());

@@ -10,12 +10,167 @@ use serde::Deserialize;
 use serenity::all::{
     CreateButton, CreateComponent, CreateContainer, CreateContainerComponent, CreateMessage,
     CreateSection, CreateSectionAccessory, CreateSectionComponent, CreateSeparator,
-    CreateTextDisplay, CreateThumbnail, CreateUnfurledMediaItem, MessageFlags,
+    CreateTextDisplay, CreateThumbnail, CreateUnfurledMediaItem, GenericChannelId, MessageFlags,
+    MessageId,
 };
-use std::sync::LazyLock;
+use std::{
+    collections::HashMap,
+    sync::{Arc, LazyLock},
+};
 use utoipa_axum::{router::OpenApiRouter, routes};
 
 mod oauth;
+
+const WORKFLOW_EDIT_COOLDOWN: std::time::Duration = std::time::Duration::from_secs(3);
+
+struct WorkflowRenderContext {
+    avatar_url: String,
+    actions_url: String,
+    footer: String,
+}
+
+#[derive(Default)]
+struct PendingWorkflowEdit {
+    dirty: bool,
+}
+
+static WORKFLOW_EDITS: LazyLock<Arc<tokio::sync::Mutex<HashMap<i64, PendingWorkflowEdit>>>> =
+    LazyLock::new(|| Arc::new(tokio::sync::Mutex::new(HashMap::new())));
+
+async fn schedule_workflow_edit(
+    state: &State,
+    github_message_id: i64,
+    context: WorkflowRenderContext,
+) {
+    {
+        let mut edits = WORKFLOW_EDITS.lock().await;
+        if let Some(pending) = edits.get_mut(&github_message_id) {
+            pending.dirty = true;
+            return;
+        }
+
+        edits.insert(github_message_id, PendingWorkflowEdit::default());
+    }
+
+    let state = state.clone();
+
+    tokio::spawn(async move {
+        loop {
+            if let Some(pending) = WORKFLOW_EDITS.lock().await.get_mut(&github_message_id) {
+                pending.dirty = false;
+            }
+
+            if let Err(err) = edit_workflow_message(&state, github_message_id, &context).await {
+                tracing::error!("failed to edit github workflow message: {:?}", err);
+                sentry_anyhow::capture_anyhow(&err);
+            }
+
+            tokio::time::sleep(WORKFLOW_EDIT_COOLDOWN).await;
+
+            let mut edits = WORKFLOW_EDITS.lock().await;
+            if !edits
+                .get(&github_message_id)
+                .is_some_and(|pending| pending.dirty)
+            {
+                edits.remove(&github_message_id);
+                break;
+            }
+        }
+    });
+}
+
+async fn edit_workflow_message(
+    state: &State,
+    github_message_id: i64,
+    context: &WorkflowRenderContext,
+) -> Result<(), anyhow::Error> {
+    let github_message: crate::models::GithubMessage =
+        sqlx::query_as("SELECT * FROM github_messages WHERE id = ?")
+            .bind(github_message_id)
+            .fetch_one(state.database.read())
+            .await?;
+
+    let mut container_components = Vec::new();
+    let mut commit_string = String::new();
+
+    for commit in github_message.commits.iter().take(8) {
+        commit_string.push_str(&format!(
+            "[`{}`]({}) ({}): {}\n",
+            commit.id.chars().take(7).collect::<String>(),
+            commit.url,
+            commit.author.user.name,
+            commit.message.lines().next().unwrap_or_default()
+        ));
+    }
+
+    if github_message.commits.len() > 8 {
+        commit_string.push_str(&format!(
+            "-# ... {} more Commits\n",
+            github_message.commits.len() - 8
+        ));
+    }
+
+    container_components.push(CreateContainerComponent::Section(CreateSection::new(
+        vec![
+            CreateSectionComponent::TextDisplay(CreateTextDisplay::new(format!(
+                "## <:package:1150890021516234832> {} pushed to `{}`",
+                commits_title(github_message.commits.len(), &github_message.compare),
+                github_message.branch
+            ))),
+            CreateSectionComponent::TextDisplay(CreateTextDisplay::new(commit_string)),
+        ],
+        CreateSectionAccessory::Thumbnail(CreateThumbnail::new(CreateUnfurledMediaItem::new(
+            context.avatar_url.clone(),
+        ))),
+    )));
+    container_components.push(CreateContainerComponent::Separator(CreateSeparator::new()));
+
+    let mut workflow_status_string = String::new();
+
+    for workflow_status in github_message.workflow_status.values() {
+        workflow_status_string.push_str(&format!(
+            "{} **{}** <t:{}:R>\n",
+            match workflow_status.status {
+                octocrab::models::workflows::Status::Completed => "<:accept:1156939740654878750>",
+                octocrab::models::workflows::Status::InProgress =>
+                    "<a:loading:1154135013948915793>",
+                octocrab::models::workflows::Status::Failed => "<:deny:1156939743230173234>",
+                _ => "<:clock:1150889651914158111>",
+            },
+            workflow_status.name,
+            workflow_status.started.timestamp()
+        ));
+    }
+
+    container_components.push(CreateContainerComponent::Section(CreateSection::new(
+        vec![
+            CreateSectionComponent::TextDisplay(CreateTextDisplay::new(
+                "### <:hammer:1150889684227076227> Workflow Status",
+            )),
+            CreateSectionComponent::TextDisplay(CreateTextDisplay::new(workflow_status_string)),
+        ],
+        CreateSectionAccessory::Button(
+            CreateButton::new_link(context.actions_url.clone()).label("View Actions"),
+        ),
+    )));
+    container_components.push(CreateContainerComponent::TextDisplay(
+        CreateTextDisplay::new(format!("-# {}", context.footer)),
+    ));
+    let component = CreateComponent::Container(CreateContainer::new(container_components));
+
+    GenericChannelId::new(state.env.github_channel_id)
+        .edit_message(
+            &*state.bot.read().await,
+            MessageId::new(github_message.message_id as u64),
+            serenity::all::EditMessage::new()
+                .components(&[component])
+                .flags(MessageFlags::IS_COMPONENTS_V2)
+                .allowed_mentions(serenity::all::CreateAllowedMentions::new()),
+        )
+        .await?;
+
+    Ok(())
+}
 
 static GITHUB_TX: LazyLock<
     tokio::sync::mpsc::UnboundedSender<(State, octocrab::models::webhook_events::WebhookEvent, u8)>,
@@ -93,7 +248,6 @@ async fn handle_repository_event(
     };
 
     let mut container_components = Vec::new();
-    let mut edit_github_message = None;
     let mut create_github_message = None;
 
     match event.specific {
@@ -439,7 +593,32 @@ async fn handle_repository_event(
             }
             entry.status = status;
 
-            edit_github_message = Some(github_message);
+            sqlx::query("UPDATE github_messages SET workflow_status = ? WHERE id = ?")
+                .bind(serde_json::to_string(&github_message.workflow_status)?)
+                .bind(github_message.id)
+                .execute(state.database.write())
+                .await?;
+
+            schedule_workflow_edit(
+                state,
+                github_message.id,
+                WorkflowRenderContext {
+                    avatar_url: organization.avatar_url.to_string(),
+                    actions_url: format!(
+                        "{}/actions",
+                        repository
+                            .html_url
+                            .as_ref()
+                            .map_or_else(|| "".to_string(), |h| h.to_string())
+                    ),
+                    footer: repository
+                        .html_url
+                        .map_or_else(|| repository.name, |h| h.to_string()),
+                },
+            )
+            .await;
+
+            return Ok(());
         }
         _ => {
             return Ok(());
@@ -460,119 +639,7 @@ async fn handle_repository_event(
         ));
     };
 
-    if let Some(edit_github_message) = edit_github_message {
-        let mut commit_string = String::new();
-
-        for commit in edit_github_message.commits.iter().take(8) {
-            commit_string.push_str(&format!(
-                "[`{}`]({}) ({}): {}\n",
-                commit.id.chars().take(7).collect::<String>(),
-                commit.url,
-                commit.author.user.name,
-                commit.message.lines().next().unwrap_or_default()
-            ));
-        }
-
-        if edit_github_message.commits.len() > 8 {
-            commit_string.push_str(&format!(
-                "-# ... {} more Commits\n",
-                edit_github_message.commits.len() - 8
-            ));
-        }
-
-        container_components.push(CreateContainerComponent::Section(CreateSection::new(
-            vec![
-                CreateSectionComponent::TextDisplay(CreateTextDisplay::new(format!(
-                    "## <:package:1150890021516234832> {} pushed to `{}`",
-                    commits_title(
-                        edit_github_message.commits.len(),
-                        &edit_github_message.compare
-                    ),
-                    edit_github_message.branch
-                ))),
-                CreateSectionComponent::TextDisplay(CreateTextDisplay::new(commit_string)),
-            ],
-            CreateSectionAccessory::Thumbnail(CreateThumbnail::new(CreateUnfurledMediaItem::new(
-                organization.avatar_url.to_string(),
-            ))),
-        )));
-        container_components.push(CreateContainerComponent::Separator(CreateSeparator::new()));
-
-        let mut workflow_status_string = String::new();
-
-        for workflow_status in edit_github_message.workflow_status.values() {
-            workflow_status_string.push_str(&format!(
-                "{} **{}** <t:{}:R>\n",
-                match workflow_status.status {
-                    octocrab::models::workflows::Status::Completed =>
-                        "<:accept:1156939740654878750>",
-                    octocrab::models::workflows::Status::InProgress =>
-                        "<a:loading:1154135013948915793>",
-                    octocrab::models::workflows::Status::Failed => "<:deny:1156939743230173234>",
-                    _ => "<:clock:1150889651914158111>",
-                },
-                workflow_status.name,
-                workflow_status.started.timestamp()
-            ));
-        }
-
-        container_components.push(CreateContainerComponent::Section(CreateSection::new(
-            vec![
-                CreateSectionComponent::TextDisplay(CreateTextDisplay::new(
-                    "### <:hammer:1150889684227076227> Workflow Status",
-                )),
-                CreateSectionComponent::TextDisplay(CreateTextDisplay::new(workflow_status_string)),
-            ],
-            CreateSectionAccessory::Button(
-                CreateButton::new_link(format!(
-                    "{}/actions",
-                    repository
-                        .html_url
-                        .as_ref()
-                        .map_or_else(|| "".to_string(), |h| h.to_string())
-                ))
-                .label("View Actions"),
-            ),
-        )));
-
-        let mut message = state
-            .bot
-            .read()
-            .await
-            .get_message(
-                channel.id.into(),
-                (edit_github_message.message_id as u64).into(),
-            )
-            .await?;
-
-        container_components.push(CreateContainerComponent::TextDisplay(
-            CreateTextDisplay::new(format!(
-                "-# {}",
-                repository
-                    .html_url
-                    .map_or_else(|| repository.name, |h| h.to_string())
-            )),
-        ));
-        let component = CreateComponent::Container(CreateContainer::new(container_components));
-
-        message
-            .edit(
-                &*state.bot.read().await,
-                serenity::all::EditMessage::new()
-                    .components(&[component])
-                    .flags(MessageFlags::IS_COMPONENTS_V2)
-                    .allowed_mentions(serenity::all::CreateAllowedMentions::new()),
-            )
-            .await?;
-
-        sqlx::query("UPDATE github_messages SET workflow_status = ? WHERE id = ?")
-            .bind(serde_json::to_string(&edit_github_message.workflow_status)?)
-            .bind(edit_github_message.id)
-            .execute(state.database.write())
-            .await?;
-
-        return Ok(());
-    } else if !container_components.is_empty() {
+    if !container_components.is_empty() {
         container_components.push(CreateContainerComponent::TextDisplay(
             CreateTextDisplay::new(format!(
                 "-# {}",

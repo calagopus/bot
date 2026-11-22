@@ -1,6 +1,7 @@
 mod admin;
 pub mod sponsor;
 mod status;
+pub mod tokei;
 
 pub struct CommandList {
     commands: Vec<poise::Command<crate::routes::InnerState, anyhow::Error>>,
@@ -31,6 +32,7 @@ pub fn commands(list: CommandList) -> CommandList {
     list.add_command(status::status_command())
         .add_command(sponsor::sponsor_command())
         .add_command(admin::admin_command())
+        .add_command(tokei::tokei_command())
 }
 
 fn field(value: &serde_json::Value, key: &str, default: serde_json::Value) -> serde_json::Value {

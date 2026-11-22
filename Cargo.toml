@@ -1,6 +1,6 @@
 [package]
 name = "bot-rs"
-version = "0.9.3"
+version = "0.10.0"
 edition = "2024"
 rust-version = "1.97.0"
 
@@ -42,6 +42,11 @@ base64 = "0.23.1"
 nestify = "0.3.3"
 aws-sdk-s3 = "1.132.0"
 rmcp = { version = "3.3.0", default-features = false, features = ["client", "transport-streamable-http-client-reqwest"] }
+tokei = { version = "15.0.0", default-features = false }
+tar = "0.4.46"
+flate2 = "1.1.11"
+tempfile = "3.27.0"
+takumi = { version = "=2.22.1", default-features = false, features = ["raster-backend", "png", "svg-source", "from-html"] }
 
 [profile.dev.package."*"]
 opt-level = 3

@@ -2,6 +2,7 @@ pub mod ai_support;
 pub mod sponsor_section;
 mod sponsor_unlink;
 mod text_message_roles;
+mod tokei_refresh;
 
 pub const SPONSOR_UNLINK_ID: &str = "sponsor_unlink:";
 pub const AI_SUPPORT_TOGGLE_ID: &str = "ai_support_toggle:";
@@ -14,6 +15,7 @@ pub const SPONSOR_SECTION_DENY_ID: &str = "sponsor_section_deny:";
 pub const SPONSOR_SECTION_REVOKE_ID: &str = "sponsor_section_revoke:";
 pub const SPONSOR_SECTION_REVOKE_MODAL_ID: &str = "sponsor_section_revoke_modal:";
 pub const SPONSOR_SECTION_REINSTATE_ID: &str = "sponsor_section_reinstate:";
+pub const TOKEI_REFRESH_ID: &str = "tokei_refresh:";
 
 #[async_trait::async_trait]
 pub trait Component {
@@ -67,4 +69,5 @@ pub fn components(list: ComponentList) -> ComponentList {
         .add_component(sponsor_section::SponsorSectionDecide)
         .add_component(sponsor_section::SponsorSectionRevoke)
         .add_component(sponsor_section::SponsorSectionReinstate)
+        .add_component(tokei_refresh::TokeiRefresh)
 }

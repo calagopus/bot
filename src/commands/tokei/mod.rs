@@ -20,7 +20,7 @@ const REFRESH_COOLDOWN_UNAUTHENTICATED: std::time::Duration =
     std::time::Duration::from_secs(15 * 60);
 const EMOJI_REFRESH_ID: u64 = 1150889388834820249;
 
-const LOGO_URL: &str = "https://calagopus.com/logo.png";
+const LOGO_URL: &str = "https://calagopus.com/icon.png";
 
 const EMOJI_STAR: &str = "<:star:1229766059381358623>";
 const EMOJI_HAMMER: &str = "<:hammer:1150889684227076227>";

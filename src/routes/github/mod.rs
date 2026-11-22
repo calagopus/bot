@@ -22,6 +22,7 @@ use utoipa_axum::{router::OpenApiRouter, routes};
 mod oauth;
 
 const WORKFLOW_EDIT_COOLDOWN: std::time::Duration = std::time::Duration::from_secs(3);
+const MAX_COMPONENTS_TEXT_LENGTH: usize = 4000;
 
 struct WorkflowRenderContext {
     avatar_url: String,
@@ -110,13 +111,31 @@ async fn edit_workflow_message(
         ));
     }
 
+    let commits_header = format!(
+        "## <:package:1150890021516234832> {} pushed to `{}`",
+        commits_title(github_message.commits.len(), &github_message.compare),
+        github_message.branch
+    );
+    let workflow_header = "### <:hammer:1150889684227076227> Workflow Status";
+    let actions_label = "View Actions";
+    let footer = format!("-# {}", context.footer);
+
+    let workflow_count = github_message.workflow_status.len();
+    let workflow_budget = MAX_COMPONENTS_TEXT_LENGTH
+        .saturating_sub(commits_header.chars().count())
+        .saturating_sub(commit_string.chars().count())
+        .saturating_sub(workflow_header.chars().count())
+        .saturating_sub(actions_label.chars().count())
+        .saturating_sub(footer.chars().count())
+        .saturating_sub(
+            format!("-# ... {workflow_count} more Jobs\n")
+                .chars()
+                .count(),
+        );
+
     container_components.push(CreateContainerComponent::Section(CreateSection::new(
         vec![
-            CreateSectionComponent::TextDisplay(CreateTextDisplay::new(format!(
-                "## <:package:1150890021516234832> {} pushed to `{}`",
-                commits_title(github_message.commits.len(), &github_message.compare),
-                github_message.branch
-            ))),
+            CreateSectionComponent::TextDisplay(CreateTextDisplay::new(commits_header)),
             CreateSectionComponent::TextDisplay(CreateTextDisplay::new(commit_string)),
         ],
         CreateSectionAccessory::Thumbnail(CreateThumbnail::new(CreateUnfurledMediaItem::new(
@@ -126,9 +145,10 @@ async fn edit_workflow_message(
     container_components.push(CreateContainerComponent::Separator(CreateSeparator::new()));
 
     let mut workflow_status_string = String::new();
+    let mut workflow_status_length = 0;
 
-    for workflow_status in github_message.workflow_status.values() {
-        workflow_status_string.push_str(&format!(
+    for (index, workflow_status) in github_message.workflow_status.values().enumerate() {
+        let line = format!(
             "{} **{}** <t:{}:R>\n",
             match workflow_status.status {
                 octocrab::models::workflows::Status::Completed => "<:accept:1156939740654878750>",
@@ -139,22 +159,30 @@ async fn edit_workflow_message(
             },
             workflow_status.name,
             workflow_status.started.timestamp()
-        ));
+        );
+        let line_length = line.chars().count();
+
+        if workflow_status_length + line_length > workflow_budget {
+            workflow_status_string
+                .push_str(&format!("-# ... {} more Jobs\n", workflow_count - index));
+            break;
+        }
+
+        workflow_status_string.push_str(&line);
+        workflow_status_length += line_length;
     }
 
     container_components.push(CreateContainerComponent::Section(CreateSection::new(
         vec![
-            CreateSectionComponent::TextDisplay(CreateTextDisplay::new(
-                "### <:hammer:1150889684227076227> Workflow Status",
-            )),
+            CreateSectionComponent::TextDisplay(CreateTextDisplay::new(workflow_header)),
             CreateSectionComponent::TextDisplay(CreateTextDisplay::new(workflow_status_string)),
         ],
         CreateSectionAccessory::Button(
-            CreateButton::new_link(context.actions_url.clone()).label("View Actions"),
+            CreateButton::new_link(context.actions_url.clone()).label(actions_label),
         ),
     )));
     container_components.push(CreateContainerComponent::TextDisplay(
-        CreateTextDisplay::new(format!("-# {}", context.footer)),
+        CreateTextDisplay::new(footer),
     ));
     let component = CreateComponent::Container(CreateContainer::new(container_components));
 
